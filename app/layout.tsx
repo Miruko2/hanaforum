@@ -1,15 +1,26 @@
 import type React from "react"
-import type { Metadata } from "next"
-import { Inter } from "next/font/google"
+import type { Metadata, Viewport } from "next"
 import "./globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
+import { AuthProvider } from "@/contexts/auth-context"
+import { Toaster } from "@/components/ui/toaster"
+import Navbar from "@/components/navbar"
 
-const inter = Inter({ subsets: ["latin"] })
+// 移除 Google Fonts 导入，使用系统字体
+// import { Inter } from 'next/font/google'
+// const inter = Inter({ subsets: ["latin"] })
 
 export const metadata: Metadata = {
-  title: "磨砂瀑布流论坛",
-  description: "一个现代化的磨砂瀑布流论坛",
-    generator: 'v0.dev'
+  title: "萤火虫之国",
+  description: "萤火虫之国",
+  generator: "v0.dev",
+}
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
 }
 
 export default function RootLayout({
@@ -19,9 +30,14 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="zh-CN" suppressHydrationWarning>
-      <body className={inter.className}>
+      {/* 移除 inter.className，使用系统字体 */}
+      <body className="font-sans">
         <ThemeProvider attribute="class" defaultTheme="dark" enableSystem>
-          {children}
+          <AuthProvider>
+            <Navbar />
+            <main className="pt-16">{children}</main>
+            <Toaster />
+          </AuthProvider>
         </ThemeProvider>
       </body>
     </html>

@@ -3,26 +3,36 @@
 import type React from "react"
 
 import { useState, useRef, useEffect } from "react"
-import { X, ImageIcon, Send } from "lucide-react"
+import { X, ImageIcon, Send, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { createPortal } from "react-dom"
+import { useAuth } from "@/contexts/auth-context"
+import { useToast } from "@/hooks/use-toast"
+import { supabase } from "@/lib/supabaseClient"
 
 interface CreatePostModalProps {
   onClose: () => void
+  onPostCreated: () => void
 }
 
-export default function CreatePostModal({ onClose }: CreatePostModalProps) {
-  const [content, setContent] = useState("")
+export default function CreatePostModal({ onClose, onPostCreated }: CreatePostModalProps) {
+  const [description, setDescription] = useState("")
   const [title, setTitle] = useState("")
   const [category, setCategory] = useState("")
   const [imagePreview, setImagePreview] = useState<string | null>(null)
+  const [imageFile, setImageFile] = useState<File | null>(null)
   const [isMounted, setIsMounted] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const modalRef = useRef<HTMLDivElement>(null)
   const previousOverflow = useRef<string>("")
+  const { user } = useAuth()
+  const { toast } = useToast()
+  const [imageRatio, setImageRatio] = useState<number>(0.75)
+  const [isMobile, setIsMobile] = useState(false)
 
   // 客户端挂载检查
   useEffect(() => {
@@ -32,11 +42,31 @@ export default function CreatePostModal({ onClose }: CreatePostModalProps) {
     document.body.style.overflow = "hidden"
     document.body.style.touchAction = "none" // 防止移动端滚动
 
+    // Check if the device is mobile
+    const mobileCheck = () => {
+      return window.innerWidth <= 768
+    }
+
+    setIsMobile(mobileCheck())
+
+    // 使用防抖处理窗口大小变化事件
+    let resizeTimeout: NodeJS.Timeout
+    const handleResize = () => {
+      clearTimeout(resizeTimeout)
+      resizeTimeout = setTimeout(() => {
+        setIsMobile(window.innerWidth < 768)
+      }, 100)
+    }
+
+    window.addEventListener("resize", handleResize)
+
     return () => {
       setIsMounted(false)
       // 恢复背景滚动
       document.body.style.overflow = previousOverflow.current
       document.body.style.touchAction = ""
+      window.removeEventListener("resize", handleResize)
+      clearTimeout(resizeTimeout)
     }
   }, [])
 
@@ -56,19 +86,162 @@ export default function CreatePostModal({ onClose }: CreatePostModalProps) {
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (file) {
+      // 检查文件大小，限制为5MB
+      if (file.size > 5 * 1024 * 1024) {
+        toast({
+          title: "文件过大",
+          description: "图片大小不能超过5MB",
+          variant: "destructive",
+        })
+        return
+      }
+
+      setImageFile(file)
       const reader = new FileReader()
       reader.onload = (e) => {
         setImagePreview(e.target?.result as string)
+
+        // 计算图片比例
+        const img = new Image()
+        img.onload = () => {
+          const ratio = img.height / img.width
+          setImageRatio(ratio)
+        }
+        img.src = e.target?.result as string
       }
       reader.readAsDataURL(file)
     }
   }
 
-  // 处理发送帖子
-  const handleSubmit = () => {
-    // 这里可以添加发送帖子的逻辑
-    console.log({ title, content, category, imagePreview })
-    onClose()
+  // 上传图片到Supabase Storage
+  const uploadImage = async (file: File): Promise<string> => {
+    try {
+      const fileExt = file.name.split(".").pop()
+      const fileName = `${Math.random().toString(36).substring(2, 15)}.${fileExt}`
+      const filePath = `${fileName}` // 移除了 post-images/ 前缀，因为存储桶本身就叫 post-images
+
+      // 将 "images" 改为 "post-images"
+      const { data, error } = await supabase.storage.from("post-images").upload(filePath, file, {
+        cacheControl: "3600",
+        upsert: false,
+      })
+
+      if (error) {
+        console.error("图片上传错误详情:", error)
+        throw error
+      }
+
+      // 获取公共URL - 这里也需要更新存储桶名称
+      const { data: urlData } = supabase.storage.from("post-images").getPublicUrl(data.path)
+      return urlData.publicUrl
+    } catch (error: any) {
+      console.error("图片上传错误:", error)
+      throw new Error(`图片上传失败: ${error.message}`)
+    }
+  }
+
+  // 创建帖子
+  const createPost = async (postData: any) => {
+    try {
+      const { data, error } = await supabase.from("posts").insert([postData]).select()
+
+      if (error) {
+        console.error("创建帖子错误:", error)
+        throw error
+      }
+
+      return { data, error: null }
+    } catch (err) {
+      console.error("创建帖子过程中出错:", err)
+      throw err
+    }
+  }
+
+  // 修改 handleSubmit 函数，简化认证处理
+  const handleSubmit = async () => {
+    if (!user) {
+      toast({
+        title: "请先登录",
+        description: "发布帖子前请先登录账号",
+        variant: "destructive",
+      })
+      return
+    }
+
+    if (!title.trim() || !description.trim() || !category.trim()) {
+      toast({
+        title: "信息不完整",
+        description: "请填写标题、分类和内容",
+        variant: "destructive",
+      })
+      return
+    }
+
+    try {
+      setIsSubmitting(true)
+      console.log("当前用户:", user.id)
+
+      // 处理图片上传
+      let image_url = undefined
+      if (imageFile) {
+        try {
+          console.log("开始上传图片...")
+          image_url = await uploadImage(imageFile)
+          console.log("上传的图片URL:", image_url)
+        } catch (uploadErr: any) {
+          console.error("图片上传过程中出错:", uploadErr)
+          // 显示更详细的错误信息
+          toast({
+            title: "图片上传失败",
+            description: `错误: ${uploadErr.message || "未知错误"}`,
+            variant: "destructive",
+          })
+          setIsSubmitting(false)
+          return // 如果图片上传失败，终止后续操作
+        }
+      }
+
+      console.log("准备创建帖子，用户ID:", user.id)
+
+      // 创建帖子 - 同时设置content和description字段
+      const result = await createPost({
+        title,
+        category,
+        description, // 设置description字段
+        content: description, // 同时设置content字段为相同的值
+        image_url,
+        image_ratio: imageRatio,
+        user_id: user.id,
+        likes: 0,
+        comments: 0,
+      })
+
+      console.log("帖子创建成功:", result)
+
+      toast({
+        title: "发布成功",
+        description: "您的帖子已成功发布",
+      })
+
+      onPostCreated()
+      onClose()
+    } catch (error: any) {
+      console.error("发布帖子失败:", error)
+
+      // 更详细的错误消息
+      let errorMessage = "发布帖子时出现错误，请稍后重试"
+      if (error.message) {
+        errorMessage = error.message
+      }
+
+      toast({
+        title: "发布失败",
+        description: errorMessage,
+        variant: "destructive",
+      })
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   // 点击上传图片按钮
@@ -78,6 +251,7 @@ export default function CreatePostModal({ onClose }: CreatePostModalProps) {
 
   if (!isMounted) return null
 
+  // Improve mobile experience for the modal
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={onClose}>
       <div className="absolute inset-0 bg-black/60 backdrop-blur-md" />
@@ -86,11 +260,17 @@ export default function CreatePostModal({ onClose }: CreatePostModalProps) {
         ref={modalRef}
         className="relative max-w-2xl w-full max-h-[90vh] overflow-y-auto m-4 rounded-xl glass-card active content-glass animate-in fade-in zoom-in duration-300"
         onClick={(e) => e.stopPropagation()}
+        style={{
+          maxHeight: isMobile ? "85vh" : "90vh",
+          width: isMobile ? "calc(100% - 32px)" : "auto",
+        }}
       >
         {/* 关闭按钮 */}
         <button
           className="absolute top-3 right-3 z-10 rounded-full bg-black/50 p-1.5 text-white hover:bg-black/70 hover:text-lime-400 transition-colors duration-300"
           onClick={onClose}
+          disabled={isSubmitting}
+          style={{ padding: isMobile ? "10px" : "6px" }} // Larger touch target on mobile
         >
           <X className="h-5 w-5" />
         </button>
@@ -110,6 +290,8 @@ export default function CreatePostModal({ onClose }: CreatePostModalProps) {
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder="输入帖子标题..."
                 className="bg-black/30 border-gray-800 focus:border-lime-500/50 text-white focus:ring-lime-500/30"
+                disabled={isSubmitting}
+                required
               />
             </div>
 
@@ -124,20 +306,24 @@ export default function CreatePostModal({ onClose }: CreatePostModalProps) {
                 onChange={(e) => setCategory(e.target.value)}
                 placeholder="输入帖子分类..."
                 className="bg-black/30 border-gray-800 focus:border-lime-500/50 text-white focus:ring-lime-500/30"
+                disabled={isSubmitting}
+                required
               />
             </div>
 
             {/* 内容输入 */}
             <div>
-              <Label htmlFor="post-content" className="text-lime-400 mb-1 block">
+              <Label htmlFor="post-description" className="text-lime-400 mb-1 block">
                 内容
               </Label>
               <Textarea
-                id="post-content"
-                value={content}
-                onChange={(e) => setContent(e.target.value)}
+                id="post-description"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
                 placeholder="分享你的想法..."
                 className="min-h-[150px] bg-black/30 border-gray-800 focus:border-lime-500/50 text-white focus:ring-lime-500/30"
+                disabled={isSubmitting}
+                required
               />
             </div>
 
@@ -151,7 +337,11 @@ export default function CreatePostModal({ onClose }: CreatePostModalProps) {
                 />
                 <button
                   className="absolute top-2 right-2 rounded-full bg-black/70 p-1 text-white hover:text-lime-400"
-                  onClick={() => setImagePreview(null)}
+                  onClick={() => {
+                    setImagePreview(null)
+                    setImageFile(null)
+                  }}
+                  disabled={isSubmitting}
                 >
                   <X className="h-4 w-4" />
                 </button>
@@ -166,6 +356,7 @@ export default function CreatePostModal({ onClose }: CreatePostModalProps) {
               accept="image/*"
               className="hidden"
               id="image-upload"
+              disabled={isSubmitting}
             />
 
             {/* 操作按钮 */}
@@ -175,6 +366,7 @@ export default function CreatePostModal({ onClose }: CreatePostModalProps) {
                 variant="outline"
                 onClick={handleImageButtonClick}
                 className="border-lime-500/50 text-lime-400 hover:bg-lime-950/50 hover:text-lime-300"
+                disabled={isSubmitting}
               >
                 <ImageIcon className="h-4 w-4 mr-2" />
                 上传图片
@@ -184,10 +376,19 @@ export default function CreatePostModal({ onClose }: CreatePostModalProps) {
                 type="button"
                 onClick={handleSubmit}
                 className="bg-lime-500 hover:bg-lime-600 text-black font-medium shadow-lg hover:shadow-lime-500/30"
-                disabled={!title.trim() || !content.trim()}
+                disabled={isSubmitting || !title.trim() || !description.trim() || !category.trim()}
               >
-                <Send className="h-4 w-4 mr-2" />
-                发布帖子
+                {isSubmitting ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    发布中...
+                  </>
+                ) : (
+                  <>
+                    <Send className="h-4 w-4 mr-2" />
+                    发布帖子
+                  </>
+                )}
               </Button>
             </div>
           </div>

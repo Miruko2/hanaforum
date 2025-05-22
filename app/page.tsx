@@ -1,17 +1,15 @@
-import Navbar from "@/components/navbar"
 import PostGrid from "@/components/post-grid"
-import FloatingActionButton from "@/components/floating-action-button"
 import BackgroundEffects from "@/components/background-effects"
+import FloatingActionButton from "@/components/floating-action-button"
 
-export default function Home() {
+export default function HomePage() {
   return (
-    <main className="min-h-screen">
+    <div className="min-h-screen relative">
       <BackgroundEffects />
-      <Navbar />
-      <div className="content-wrap pt-4 pb-8 px-4">
+      <div className="container mx-auto px-4 py-8">
         <PostGrid />
       </div>
       <FloatingActionButton />
-    </main>
+    </div>
   )
 }
