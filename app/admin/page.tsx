@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useAuth } from "@/contexts/auth-context"
+import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { Shield, Users, FileText, Trash2, AlertCircle } from "lucide-react"
@@ -22,7 +22,7 @@ import { Input } from "@/components/ui/input"
 import { useToast } from "@/hooks/use-toast"
 
 export default function AdminPage() {
-  const { user, isAdmin } = useAuth()
+  const { user, isAdmin, loading: authLoading } = useSimpleAuth()
   const router = useRouter()
   const { toast } = useToast()
   const [loading, setLoading] = useState(true)
@@ -35,25 +35,26 @@ export default function AdminPage() {
   const [selectedItem, setSelectedItem] = useState<{ id: string; type: string } | null>(null)
 
   useEffect(() => {
+    // 等待认证状态完成初始化再判断
+    if (authLoading) return
+
     // 如果用户未登录或不是管理员，重定向到首页
-    if (!loading && (!user || !isAdmin)) {
+    if (!user || !isAdmin) {
       router.push("/")
       return
     }
 
-    if (user && isAdmin) {
-      loadData()
-    }
-  }, [user, isAdmin, loading, router])
+    loadData()
+  }, [user, isAdmin, authLoading, router])
 
   const loadData = async () => {
     setLoading(true)
     try {
-      // 加载用户列表
+      // 加载用户列表 - 从 profiles 表获取（users 表为空，user_profiles 被 RLS 拦截）
       const { data: usersData, error: usersError } = await supabase
-        .from("users")
-        .select("*")
-        .order("created_at", { ascending: false })
+        .from("profiles")
+        .select("id, username, avatar_url, updated_at")
+        .order("updated_at", { ascending: false, nullsFirst: false })
 
       if (usersError) throw usersError
       setUsers(usersData || [])
@@ -61,20 +62,67 @@ export default function AdminPage() {
       // 加载帖子列表
       const { data: postsData, error: postsError } = await supabase
         .from("posts")
-        .select("*, users:user_id (username)")
+        .select("id, title, content, description, category, user_id, created_at")
         .order("created_at", { ascending: false })
 
       if (postsError) throw postsError
-      setPosts(postsData || [])
 
-      // 加载管理员列表
+      // 处理帖子数据 - 批量查询 profiles 获取用户名
+      const postUserIds = [...new Set((postsData || []).map(p => p.user_id).filter(Boolean))]
+      const usernameMap = new Map<string, string>()
+
+      if (postUserIds.length > 0) {
+        const { data: profiles } = await supabase
+          .from("profiles")
+          .select("id, username")
+          .in("id", postUserIds)
+
+        for (const p of profiles || []) {
+          if (p.username) {
+            const name = p.username.includes("@") ? p.username.split("@")[0] : p.username
+            usernameMap.set(p.id, name)
+          }
+        }
+      }
+
+      const processedPosts = (postsData || []).map(post => ({
+        ...post,
+        username: usernameMap.get(post.user_id) || `用户_${post.user_id.substring(0, 6)}`,
+      }))
+
+      setPosts(processedPosts)
+
+      // 加载管理员列表 - admin_users 表不和 users 做 join（users 表为空），改为单独查 profiles
       const { data: adminsData, error: adminsError } = await supabase
         .from("admin_users")
-        .select("*, users:user_id (email, username)")
+        .select("id, user_id, added_by, created_at")
         .order("created_at", { ascending: false })
 
       if (adminsError) throw adminsError
-      setAdmins(adminsData || [])
+
+      const adminUserIds = [...new Set((adminsData || []).map(a => a.user_id).filter(Boolean))]
+      const adminProfileMap = new Map<string, { username: string | null }>()
+
+      if (adminUserIds.length > 0) {
+        const { data: adminProfiles } = await supabase
+          .from("profiles")
+          .select("id, username")
+          .in("id", adminUserIds)
+
+        for (const p of adminProfiles || []) {
+          adminProfileMap.set(p.id, { username: p.username })
+        }
+      }
+
+      const processedAdmins = (adminsData || []).map(a => ({
+        ...a,
+        users: {
+          username: adminProfileMap.get(a.user_id)?.username || null,
+          email: null, // anon key 无法访问 auth.users 表，邮箱显示为空
+        },
+      }))
+
+      setAdmins(processedAdmins)
     } catch (error) {
       console.error("加载数据错误:", error)
       toast({
@@ -91,7 +139,7 @@ export default function AdminPage() {
     if (!newAdminEmail.trim()) {
       toast({
         title: "输入错误",
-        description: "请输入有效的邮箱地址",
+        description: "请输入用户名或用户ID",
         variant: "destructive",
       })
       return
@@ -99,17 +147,30 @@ export default function AdminPage() {
 
     setAddingAdmin(true)
     try {
-      // 先查找用户ID
-      const { data: userData, error: userError } = await supabase
-        .from("users")
-        .select("id")
-        .eq("email", newAdminEmail.trim())
-        .single()
+      const input = newAdminEmail.trim()
+      let targetUserId: string | null = null
 
-      if (userError) {
+      // 如果输入看起来是 UUID，直接用
+      const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+      if (uuidRe.test(input)) {
+        targetUserId = input
+      } else {
+        // 否则在 profiles 表按用户名查找
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("id")
+          .eq("username", input)
+          .maybeSingle()
+
+        if (profile?.id) {
+          targetUserId = profile.id
+        }
+      }
+
+      if (!targetUserId) {
         toast({
           title: "用户不存在",
-          description: "找不到该邮箱对应的用户",
+          description: "找不到该用户名或用户ID对应的用户",
           variant: "destructive",
         })
         return
@@ -118,7 +179,7 @@ export default function AdminPage() {
       // 添加管理员
       const { error: adminError } = await supabase
         .from("admin_users")
-        .insert([{ user_id: userData.id, added_by: user?.id }])
+        .insert([{ user_id: targetUserId, added_by: user?.id }])
 
       if (adminError) {
         if (adminError.code === "23505") {
@@ -260,7 +321,7 @@ export default function AdminPage() {
             <CardContent>
               <div className="flex mb-4">
                 <Input
-                  placeholder="输入用户邮箱"
+                  placeholder="输入用户名或用户 ID"
                   value={newAdminEmail}
                   onChange={(e) => setNewAdminEmail(e.target.value)}
                   className="mr-2 bg-gray-800 border-gray-700"
@@ -272,7 +333,7 @@ export default function AdminPage() {
 
               <div className="border rounded-md border-gray-800">
                 <div className="grid grid-cols-3 gap-4 p-4 font-medium text-gray-400 border-b border-gray-800">
-                  <div>邮箱</div>
+                  <div>用户名</div>
                   <div>添加时间</div>
                   <div className="text-right">操作</div>
                 </div>
@@ -284,7 +345,9 @@ export default function AdminPage() {
                       key={admin.id}
                       className="grid grid-cols-3 gap-4 p-4 border-b border-gray-800 last:border-0 items-center"
                     >
-                      <div className="text-white">{admin.users?.email || "未知"}</div>
+                      <div className="text-white">
+                        {admin.users?.username || `用户_${admin.user_id?.substring(0, 6) || "未知"}`}
+                      </div>
                       <div className="text-gray-400">
                         {new Date(admin.created_at).toLocaleString("zh-CN", {
                           year: "numeric",
@@ -323,29 +386,21 @@ export default function AdminPage() {
             </CardHeader>
             <CardContent>
               <div className="border rounded-md border-gray-800">
-                <div className="grid grid-cols-4 gap-4 p-4 font-medium text-gray-400 border-b border-gray-800">
+                <div className="grid grid-cols-3 gap-4 p-4 font-medium text-gray-400 border-b border-gray-800">
                   <div>用户名</div>
-                  <div>邮箱</div>
-                  <div>注册时间</div>
+                  <div>用户 ID</div>
                   <div className="text-right">操作</div>
                 </div>
                 {users.length === 0 ? (
                   <div className="p-4 text-center text-gray-500">暂无数据</div>
                 ) : (
-                  users.map((user) => (
+                  users.map((u) => (
                     <div
-                      key={user.id}
-                      className="grid grid-cols-4 gap-4 p-4 border-b border-gray-800 last:border-0 items-center"
+                      key={u.id}
+                      className="grid grid-cols-3 gap-4 p-4 border-b border-gray-800 last:border-0 items-center"
                     >
-                      <div className="text-white">{user.username || "未设置"}</div>
-                      <div className="text-gray-300">{user.email}</div>
-                      <div className="text-gray-400">
-                        {new Date(user.created_at).toLocaleString("zh-CN", {
-                          year: "numeric",
-                          month: "2-digit",
-                          day: "2-digit",
-                        })}
-                      </div>
+                      <div className="text-white">{u.username || "未设置"}</div>
+                      <div className="text-gray-300 font-mono text-xs truncate">{u.id}</div>
                       <div className="text-right">{/* 这里可以添加用户管理操作，如封禁等 */}</div>
                     </div>
                   ))
@@ -378,7 +433,7 @@ export default function AdminPage() {
                       className="grid grid-cols-4 gap-4 p-4 border-b border-gray-800 last:border-0 items-center"
                     >
                       <div className="text-white truncate">{post.title}</div>
-                      <div className="text-gray-300">{post.users?.username || "匿名用户"}</div>
+                      <div className="text-gray-300">{post.username || "匿名用户"}</div>
                       <div className="text-gray-400">
                         {new Date(post.created_at).toLocaleString("zh-CN", {
                           year: "numeric",

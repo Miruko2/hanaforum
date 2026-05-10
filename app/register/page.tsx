@@ -1,7 +1,7 @@
 // app/register/page.tsx
-import { RegisterForm } from '@/components/auth/register-form';
-import Navbar from '@/components/navbar';
-import BackgroundEffects from '@/components/background-effects';
+import { RegisterForm } from "@/components/auth/register-form"
+import Navbar from "@/components/navbar"
+import BackgroundEffects from "@/components/background-effects"
 
 export default function RegisterPage() {
   return (
@@ -12,5 +12,5 @@ export default function RegisterPage() {
         <RegisterForm />
       </div>
     </main>
-  );
+  )
 }

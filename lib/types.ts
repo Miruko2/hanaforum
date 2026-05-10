@@ -15,6 +15,16 @@ export interface Post {
   created_at: string
   username?: string // 用于显示，从关联查询中获取
   imageContent?: string // 用于UI显示，当没有图片时
+  users?: UserRecord; // 添加 users 属性，匹配 join 返回的结构
+  isPinned?: boolean // 标记是否为置顶帖子
+}
+
+// 用户记录接口
+export interface UserRecord {
+  id?: string
+  username?: string
+  email?: string
+  avatar_url?: string
 }
 
 export interface PostInput {
@@ -48,5 +58,32 @@ export interface Comment {
     id: string
     username: string
     avatar_url?: string
+  }
+}
+
+// 通知类型
+export type NotificationType = 'like_post' | 'comment_post' | 'like_comment';
+
+// 通知接口
+export interface Notification {
+  id: string
+  user_id: string      // 接收通知的用户
+  type: NotificationType
+  post_id?: string     // 相关帖子ID（可选）
+  comment_id?: string  // 相关评论ID（可选）
+  actor_id?: string    // 触发者ID
+  message: string      // 通知内容
+  is_read: boolean     // 是否已读
+  created_at: string
+  // 关联数据
+  actor?: {
+    username: string
+    avatar_url?: string
+  }
+  post?: {
+    title: string
+  }
+  comment?: {
+    content: string
   }
 }

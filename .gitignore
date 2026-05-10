@@ -26,3 +26,11 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 .vercel
+
+# ⚠️ 敏感凭证：绝对不能进仓库
+supabase_apikey.txt
+*.keystore
+
+# 本地构建/临时产物
+/out/
+tsconfig.tsbuildinfo

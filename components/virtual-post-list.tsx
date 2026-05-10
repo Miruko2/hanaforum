@@ -1,151 +1,210 @@
 "use client"
 
-import { useState, useEffect, useRef, useCallback } from "react"
+import { useEffect, useRef, useCallback, useState, memo } from "react"
+import Masonry from "react-masonry-css"
+import { useInView } from "react-intersection-observer"
 import PostCard from "./post-card"
+import { PulseLoading } from "./ui/loading-animation"
 import type { Post } from "@/lib/types"
-import { Loader2 } from "lucide-react"
 
 interface VirtualPostListProps {
   posts: Post[]
-  loadMorePosts?: () => Promise<void>
+  loadMorePosts?: (page: number, limit: number) => Promise<void>
   hasMore?: boolean
   loading?: boolean
+  activePostId?: string | null
+  onPostClick?: (postId: string) => void
+  onPostClose?: () => void
+  onPostUpdated?: (postId: string, updates: Partial<Post>) => void
+  onPostDeleted?: (postId: string) => void
+  pageSize?: number
 }
 
+// 响应式列数配置：key 是最大视口宽度，value 是列数
+// "default" 是超出最大断点时的默认列数
+const breakpointColumns = {
+  default: 5, // >= 1920
+  1919: 4,    // 1536 - 1919
+  1535: 3,    // 1280 - 1535
+  1279: 2,    // 768 - 1279
+  767: 2,     // < 768
+}
+
+/**
+ * 单个卡片包装：用 IntersectionObserver 触发入场动画
+ * 这样做的好处是不用再维护全局的可见性字典，动画完全依赖 DOM 可见性
+ */
+const PostItem = memo(function PostItem({
+  post,
+  isActive,
+  onClick,
+  onClose,
+  onPostUpdated,
+  onPostDeleted,
+}: {
+  post: Post
+  isActive: boolean
+  onClick: () => void
+  onClose: () => void
+  onPostUpdated?: (postId: string, updates: Partial<Post>) => void
+  onPostDeleted?: (postId: string) => void
+}) {
+  // 每次进入视口都重新触发入场动画。离开视口后再进来，视觉上会重播"雾中浮现"
+  const { ref, inView } = useInView({
+    threshold: 0.05,
+    // 提前一点触发，让动画不会等到卡片完全进入视口
+    rootMargin: "100px 0px",
+  })
+
+  // 置顶帖子永远保持可见态，不随滚动重播
+  const visible = post.isPinned || inView
+
+  return (
+    <div
+      ref={ref}
+      className={`post-card-container post-enter ${visible ? "post-enter-visible" : ""}`}
+    >
+      <PostCard
+        post={post}
+        isActive={isActive}
+        onClick={onClick}
+        onClose={onClose}
+        onPostUpdated={onPostUpdated}
+        onPostDeleted={onPostDeleted}
+        useWideTemplate={post.image_ratio ? post.image_ratio >= 1.0 : false}
+      />
+    </div>
+  )
+})
+
 export default function VirtualPostList({
-  posts,
+  posts = [],
   loadMorePosts,
   hasMore = false,
   loading = false,
+  activePostId = null,
+  onPostClick,
+  onPostClose,
+  onPostUpdated,
+  onPostDeleted,
+  pageSize = 30,
 }: VirtualPostListProps) {
-  const [visiblePosts, setVisiblePosts] = useState<Post[]>([])
-  const [activePostId, setActivePostId] = useState<string | null>(null)
-  const [itemsPerRow, setItemsPerRow] = useState(4) // 默认每行4个
-  const observerRef = useRef<IntersectionObserver | null>(null)
-  const loadMoreRef = useRef<HTMLDivElement | null>(null)
+  // 当前已加载的页码，0 表示已加载第 0 页
+  const [currentPage, setCurrentPage] = useState(0)
+  const loadingMoreRef = useRef(false)
+  const mountedRef = useRef(true)
+  const [activePostIdInternal, setActivePostIdInternal] = useState<string | null>(null)
+  const savedScrollRef = useRef(0)
 
-  // 根据屏幕宽度计算每行显示的帖子数量
+  // 底部哨兵，进入视口就触发加载下一页
+  const [loadMoreRef, inView] = useInView({
+    rootMargin: "400px 0px", // 提前 400px 触发，避免用户看到空白
+  })
+
   useEffect(() => {
-    const calculateItemsPerRow = () => {
-      const width = window.innerWidth
-      if (width < 640) return 1 // xs
-      if (width < 768) return 2 // sm
-      if (width < 1024) return 3 // md
-      if (width < 1280) return 3 // lg
-      return 4 // xl
-    }
-
-    const handleResize = () => {
-      setItemsPerRow(calculateItemsPerRow())
-    }
-
-    // 初始计算
-    handleResize()
-
-    // 监听窗口大小变化
-    window.addEventListener("resize", handleResize)
-    return () => window.removeEventListener("resize", handleResize)
-  }, [])
-
-  // 设置无限滚动
-  useEffect(() => {
-    // 清理之前的观察器
-    if (observerRef.current) {
-      observerRef.current.disconnect()
-    }
-
-    // 创建新的观察器
-    observerRef.current = new IntersectionObserver(
-      (entries) => {
-        const [entry] = entries
-        if (entry.isIntersecting && hasMore && !loading && loadMorePosts) {
-          loadMorePosts()
-        }
-      },
-      { threshold: 0.1 },
-    )
-
-    // 观察加载更多元素
-    if (loadMoreRef.current) {
-      observerRef.current.observe(loadMoreRef.current)
-    }
-
+    mountedRef.current = true
     return () => {
-      if (observerRef.current) {
-        observerRef.current.disconnect()
-      }
+      mountedRef.current = false
     }
-  }, [hasMore, loading, loadMorePosts])
+  }, [])
 
-  // 初始化可见帖子
+  // 触底加载
   useEffect(() => {
-    if (posts.length > 0) {
-      // 初始显示前12个帖子或所有帖子（如果少于12个）
-      const initialCount = Math.min(12, posts.length)
-      setVisiblePosts(posts.slice(0, initialCount))
-    }
-  }, [posts])
+    if (!inView || !hasMore || loading || loadingMoreRef.current || !loadMorePosts) return
 
-  // 处理帖子点击
-  const handlePostClick = useCallback((postId: string) => {
-    setActivePostId(postId)
-  }, [])
+    loadingMoreRef.current = true
+    const nextPage = currentPage + 1
 
-  // 处理帖子关闭
-  const handlePostClose = useCallback(() => {
-    setActivePostId(null)
-  }, [])
-
-  // 处理帖子更新
-  const handlePostUpdated = useCallback((updatedPostId: string, updatedData: Partial<Post>) => {
-    setVisiblePosts((currentPosts) =>
-      currentPosts.map((post) => {
-        if (post.id === updatedPostId) {
-          return { ...post, ...updatedData }
+    loadMorePosts(nextPage, pageSize)
+      .then(() => {
+        if (mountedRef.current) {
+          setCurrentPage(nextPage)
         }
-        return post
-      }),
-    )
-  }, [])
+      })
+      .catch((err) => {
+        console.error("加载更多帖子失败:", err)
+      })
+      .finally(() => {
+        loadingMoreRef.current = false
+      })
+  }, [inView, hasMore, loading, loadMorePosts, pageSize, currentPage])
 
-  // 处理帖子删除
-  const handlePostDeleted = useCallback((deletedPostId: string) => {
-    setVisiblePosts((currentPosts) => currentPosts.filter((post) => post.id !== deletedPostId))
-  }, [])
+  // 当前激活的帖子 ID：优先用外部控制
+  const currentActivePostId = activePostId !== null ? activePostId : activePostIdInternal
 
-  // 如果没有帖子，显示空状态
-  if (posts.length === 0 && !loading) {
+  const handlePostClick = useCallback(
+    (postId: string) => {
+      savedScrollRef.current = window.scrollY
+      if (onPostClick) {
+        onPostClick(postId)
+      } else {
+        setActivePostIdInternal(postId)
+      }
+    },
+    [onPostClick]
+  )
+
+  const handlePostClose = useCallback(() => {
+    if (onPostClose) {
+      onPostClose()
+    } else {
+      setActivePostIdInternal(null)
+    }
+
+    // 恢复滚动位置
+    if (savedScrollRef.current > 0) {
+      window.scrollTo({ top: savedScrollRef.current, behavior: "auto" })
+    }
+  }, [onPostClose])
+
+  // 初次加载、没有数据
+  if (loading && posts.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center py-20 text-center">
+      <div className="flex justify-center items-center h-32 w-full">
+        <PulseLoading />
+      </div>
+    )
+  }
+
+  if (posts.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 text-center w-full">
         <div className="text-4xl mb-4">🌱</div>
-        <h3 className="text-xl font-semibold text-white mb-2">还没有帖子</h3>
-        <p className="text-gray-400 max-w-md">成为第一个发布帖子的人！点击右下角的"+"按钮创建新帖子。</p>
+        <h3 className="text-xl font-semibold mb-2">还没有帖子</h3>
+        <p className="text-gray-500 max-w-md">成为第一个发布帖子的人！点击右下角的"+"按钮创建新帖子。</p>
       </div>
     )
   }
 
   return (
-    <div className="relative min-h-[200px]">
-      {/* 帖子网格 */}
-      <div className="grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-        {visiblePosts.map((post) => (
-          <div key={post.id} className="w-full h-full">
-            <PostCard
+    <div className="w-full">
+      <Masonry
+        breakpointCols={breakpointColumns}
+        className="masonry-grid"
+        columnClassName="masonry-grid-column"
+      >
+        {posts.map((post) => {
+          if (!post || !post.id) return null
+          return (
+            <PostItem
+              key={post.isPinned ? `pinned-${post.id}` : post.id}
               post={post}
-              isActive={activePostId === post.id}
+              isActive={currentActivePostId === post.id}
               onClick={() => handlePostClick(post.id)}
               onClose={handlePostClose}
-              onPostUpdated={handlePostUpdated}
-              onPostDeleted={handlePostDeleted}
+              onPostUpdated={onPostUpdated}
+              onPostDeleted={onPostDeleted}
             />
-          </div>
-        ))}
-      </div>
+          )
+        })}
+      </Masonry>
 
-      {/* 加载更多指示器 */}
+      {/* 底部加载哨兵 + 状态指示 */}
       <div ref={loadMoreRef} className="flex justify-center items-center py-8">
-        {loading && <Loader2 className="h-6 w-6 text-lime-500 animate-spin" />}
-        {!loading && hasMore && <div className="h-8" />}
+        {loading && posts.length > 0 && <PulseLoading />}
+        {!loading && !hasMore && posts.length > 0 && (
+          <div className="text-sm text-gray-500">没有更多了</div>
+        )}
       </div>
     </div>
   )

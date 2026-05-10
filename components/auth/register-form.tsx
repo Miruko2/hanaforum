@@ -4,11 +4,13 @@
 import type React from "react"
 
 import { useState } from "react"
-import { useAuth } from "@/contexts/auth-context"
+import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { useToast } from "@/hooks/use-toast"
+import { navigateTo } from "@/lib/app-navigation"
 
 export function RegisterForm() {
   const [email, setEmail] = useState("")
@@ -16,8 +18,9 @@ export function RegisterForm() {
   const [username, setUsername] = useState("")
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
-  const { signUp } = useAuth()
+  const { signUp } = useSimpleAuth()
   const router = useRouter()
+  const { toast } = useToast()
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -26,11 +29,23 @@ export function RegisterForm() {
 
     try {
       // 注册用户，并将用户名添加到用户元数据中
-      await signUp(email, password, username)
+      const { error: signUpError } = await signUp(email, password, username)
+      
+      if (signUpError) {
+        setError(signUpError.message || "注册失败")
+        return
+      }
 
-      // 注册成功后重定向到登录页
-      router.push("/login")
+      // 显示成功消息
+      toast({
+        title: "注册成功",
+        description: "请登录您的账号",
+      })
+      
+      // 使用新的导航系统，延迟导航到登录页面
+      navigateTo('/login', { delay: 1000 });
     } catch (err: any) {
+      console.error("注册错误:", err);
       setError(err.message || "注册失败")
     } finally {
       setLoading(false)
@@ -38,11 +53,13 @@ export function RegisterForm() {
   }
 
   return (
-    <div className="w-full max-w-md mx-auto glass-card p-6 rounded-xl">
+    <div className="w-full max-w-md mx-auto p-8 rounded-2xl
+      bg-black/20 backdrop-blur-lg border border-white/10 shadow-2xl
+      transition-all duration-300">
       <h2 className="text-2xl font-bold text-center text-lime-400 mb-6">注册</h2>
 
       <form onSubmit={handleSubmit} className="space-y-4">
-        {error && <div className="text-red-500 text-sm">{error}</div>}
+        {error && <div className="p-3 rounded-md bg-red-900/30 text-red-400 text-sm">{error}</div>}
 
         <div className="space-y-2">
           <Label htmlFor="username">用户名</Label>
@@ -51,7 +68,7 @@ export function RegisterForm() {
             value={username}
             onChange={(e) => setUsername(e.target.value)}
             required
-            className="bg-black/30 border-gray-800 focus:border-lime-500/50"
+            className="bg-black/30 border-gray-800 focus:border-lime-500/50 text-white"
           />
         </div>
 
@@ -63,7 +80,7 @@ export function RegisterForm() {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required
-            className="bg-black/30 border-gray-800 focus:border-lime-500/50"
+            className="bg-black/30 border-gray-800 focus:border-lime-500/50 text-white"
           />
         </div>
 
@@ -75,7 +92,7 @@ export function RegisterForm() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required
-            className="bg-black/30 border-gray-800 focus:border-lime-500/50"
+            className="bg-black/30 border-gray-800 focus:border-lime-500/50 text-white"
           />
         </div>
 

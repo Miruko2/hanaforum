@@ -2,6 +2,6 @@
 <resources>
     <string name="app_name">萤火虫之国</string>
     <string name="title_activity_main">萤火虫之国</string>
-    <string name="package_name">com.miruko.firefly</string>
-    <string name="custom_url_scheme">com.miruko.firefly</string>
+    <string name="package_name">com.firefly.forum</string>
+    <string name="custom_url_scheme">com.firefly.forum</string>
 </resources>

@@ -9,9 +9,11 @@ import { Textarea } from "@/components/ui/textarea"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { createPortal } from "react-dom"
-import { useAuth } from "@/contexts/auth-context"
+import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { useToast } from "@/hooks/use-toast"
 import { supabase } from "@/lib/supabaseClient"
+import { cn } from "@/lib/utils"
+import { CATEGORIES } from "@/lib/categories"
 
 interface CreatePostModalProps {
   onClose: () => void
@@ -21,7 +23,7 @@ interface CreatePostModalProps {
 export default function CreatePostModal({ onClose, onPostCreated }: CreatePostModalProps) {
   const [description, setDescription] = useState("")
   const [title, setTitle] = useState("")
-  const [category, setCategory] = useState("")
+  const [category, setCategory] = useState("general")
   const [imagePreview, setImagePreview] = useState<string | null>(null)
   const [imageFile, setImageFile] = useState<File | null>(null)
   const [isMounted, setIsMounted] = useState(false)
@@ -29,7 +31,7 @@ export default function CreatePostModal({ onClose, onPostCreated }: CreatePostMo
   const fileInputRef = useRef<HTMLInputElement>(null)
   const modalRef = useRef<HTMLDivElement>(null)
   const previousOverflow = useRef<string>("")
-  const { user } = useAuth()
+  const { user } = useSimpleAuth()
   const { toast } = useToast()
   const [imageRatio, setImageRatio] = useState<number>(0.75)
   const [isMobile, setIsMobile] = useState(false)
@@ -258,16 +260,21 @@ export default function CreatePostModal({ onClose, onPostCreated }: CreatePostMo
 
       <div
         ref={modalRef}
-        className="relative max-w-2xl w-full max-h-[90vh] overflow-y-auto m-4 rounded-xl glass-card active content-glass animate-in fade-in zoom-in duration-300"
+        className="relative max-w-2xl w-full max-h-[90vh] overflow-y-auto m-4 rounded-2xl animate-in fade-in zoom-in duration-300"
         onClick={(e) => e.stopPropagation()}
         style={{
           maxHeight: isMobile ? "85vh" : "90vh",
           width: isMobile ? "calc(100% - 32px)" : "auto",
+          background: "rgba(255, 255, 255, 0.07)",
+          backdropFilter: "blur(24px) saturate(150%)",
+          WebkitBackdropFilter: "blur(24px) saturate(150%)",
+          border: "1px solid rgba(255, 255, 255, 0.15)",
+          boxShadow: "0 8px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.1)",
         }}
       >
         {/* 关闭按钮 */}
         <button
-          className="absolute top-3 right-3 z-10 rounded-full bg-black/50 p-1.5 text-white hover:bg-black/70 hover:text-lime-400 transition-colors duration-300"
+          className="absolute top-3 right-3 z-10 rounded-full bg-black/50 p-1.5 text-white hover:bg-black/70 hover:text-white/80 transition-colors duration-300"
           onClick={onClose}
           disabled={isSubmitting}
           style={{ padding: isMobile ? "10px" : "6px" }} // Larger touch target on mobile
@@ -275,13 +282,13 @@ export default function CreatePostModal({ onClose, onPostCreated }: CreatePostMo
           <X className="h-5 w-5" />
         </button>
 
-        <div className="p-5 frosted-glass">
-          <h3 className="text-xl font-semibold text-white mb-5 neon-text">创建新帖子</h3>
+        <div className="p-5">
+          <h3 className="text-xl font-semibold text-white mb-5">创建新帖子</h3>
 
           <div className="space-y-4">
             {/* 标题输入 */}
             <div>
-              <Label htmlFor="post-title" className="text-lime-400 mb-1 block">
+              <Label htmlFor="post-title" className="text-white/80 mb-1 block">
                 标题
               </Label>
               <Input
@@ -289,31 +296,43 @@ export default function CreatePostModal({ onClose, onPostCreated }: CreatePostMo
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder="输入帖子标题..."
-                className="bg-black/30 border-gray-800 focus:border-lime-500/50 text-white focus:ring-lime-500/30"
+                className="bg-white/[0.06] border-white/[0.12] focus:border-white/30 text-white placeholder:text-white/40 focus:ring-white/20 rounded-lg"
                 disabled={isSubmitting}
                 required
               />
             </div>
 
-            {/* 分类输入 */}
+            {/* 分类标签 */}
             <div>
-              <Label htmlFor="post-category" className="text-lime-400 mb-1 block">
+              <Label className="text-white/80 mb-2 block">
                 分类
               </Label>
-              <Input
-                id="post-category"
-                value={category}
-                onChange={(e) => setCategory(e.target.value)}
-                placeholder="输入帖子分类..."
-                className="bg-black/30 border-gray-800 focus:border-lime-500/50 text-white focus:ring-lime-500/30"
-                disabled={isSubmitting}
-                required
-              />
+              <div className="flex gap-2 flex-wrap">
+                {CATEGORIES.map((tag) => {
+                  const active = category === tag.value
+                  return (
+                    <button
+                      key={tag.value}
+                      type="button"
+                      onClick={() => setCategory(tag.value)}
+                      disabled={isSubmitting}
+                      className={cn(
+                        "px-4 py-1.5 rounded-2xl text-sm font-medium transition-all duration-200 border backdrop-blur-lg",
+                        active
+                          ? "bg-lime-400/20 border-lime-400/40 text-lime-400 shadow-lg"
+                          : "bg-black/20 border-white/10 text-white/70 hover:text-white hover:bg-white/10"
+                      )}
+                    >
+                      {tag.label}
+                    </button>
+                  )
+                })}
+              </div>
             </div>
 
             {/* 内容输入 */}
             <div>
-              <Label htmlFor="post-description" className="text-lime-400 mb-1 block">
+              <Label htmlFor="post-description" className="text-white/80 mb-1 block">
                 内容
               </Label>
               <Textarea
@@ -321,7 +340,7 @@ export default function CreatePostModal({ onClose, onPostCreated }: CreatePostMo
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 placeholder="分享你的想法..."
-                className="min-h-[150px] bg-black/30 border-gray-800 focus:border-lime-500/50 text-white focus:ring-lime-500/30"
+                className="min-h-[150px] bg-white/[0.06] border-white/[0.12] focus:border-white/30 text-white placeholder:text-white/40 focus:ring-white/20 rounded-lg"
                 disabled={isSubmitting}
                 required
               />
@@ -329,14 +348,14 @@ export default function CreatePostModal({ onClose, onPostCreated }: CreatePostMo
 
             {/* 图片预览 */}
             {imagePreview && (
-              <div className="relative mt-4 rounded-lg overflow-hidden border border-lime-500/30">
+              <div className="relative mt-4 rounded-lg overflow-hidden border border-white/[0.12]">
                 <img
                   src={imagePreview || "/placeholder.svg"}
                   alt="Preview"
                   className="w-full h-auto max-h-[200px] object-contain"
                 />
                 <button
-                  className="absolute top-2 right-2 rounded-full bg-black/70 p-1 text-white hover:text-lime-400"
+                  className="absolute top-2 right-2 rounded-full bg-black/50 backdrop-blur-md p-1 text-white hover:text-white/80"
                   onClick={() => {
                     setImagePreview(null)
                     setImageFile(null)
@@ -365,7 +384,7 @@ export default function CreatePostModal({ onClose, onPostCreated }: CreatePostMo
                 type="button"
                 variant="outline"
                 onClick={handleImageButtonClick}
-                className="border-lime-500/50 text-lime-400 hover:bg-lime-950/50 hover:text-lime-300"
+                className="bg-white/[0.08] border-white/[0.12] text-white/80 hover:bg-white/[0.12] hover:text-white backdrop-blur-md rounded-full"
                 disabled={isSubmitting}
               >
                 <ImageIcon className="h-4 w-4 mr-2" />
@@ -375,7 +394,7 @@ export default function CreatePostModal({ onClose, onPostCreated }: CreatePostMo
               <Button
                 type="button"
                 onClick={handleSubmit}
-                className="bg-lime-500 hover:bg-lime-600 text-black font-medium shadow-lg hover:shadow-lime-500/30"
+                className="bg-white/[0.12] border border-white/[0.15] text-white font-medium hover:bg-white/[0.18] backdrop-blur-md rounded-full"
                 disabled={isSubmitting || !title.trim() || !description.trim() || !category.trim()}
               >
                 {isSubmitting ? (

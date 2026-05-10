@@ -1,6 +1,6 @@
 "use client"
 
-import { useAuth } from "@/contexts/auth-context"
+import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { useEffect, useState } from "react"
 import { supabase } from "@/lib/supabaseClient"
 import { Shield, AlertCircle, CheckCircle, XCircle, RefreshCw } from "lucide-react"
@@ -9,7 +9,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Separator } from "@/components/ui/separator"
 
 export default function AdminCheckPage() {
-  const { user, isAdmin } = useAuth()
+  const { user, isAdmin } = useSimpleAuth()
   const [loading, setLoading] = useState(false)
   const [adminRecord, setAdminRecord] = useState<any>(null)
   const [directCheck, setDirectCheck] = useState<boolean | null>(null)

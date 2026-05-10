@@ -1,80 +1,119 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  reactStrictMode: true,
+  // 基础配置
+  reactStrictMode: false,
   swcMinify: true,
-  //output: 'export', // 添加这一行以生成静态输出
+  
+  // 静态导出配置 - 这是核心配置
+  output: 'export',
+  trailingSlash: true,
+  
+  // 禁用不兼容的功能
   eslint: {
     ignoreDuringBuilds: true,
   },
   typescript: {
     ignoreBuildErrors: true,
   },
+  
+  // 图像配置 - 静态导出必需但添加本地优化支持
   images: {
-    domains: [
-      'localhost',
-      'vercel.com',
-      'images.unsplash.com',
-      'source.unsplash.com',
-      'picsum.photos',
-      'placehold.co',
-      'placekitten.com',
-      'dummyimage.com',
-      'via.placeholder.com',
-      'randomuser.me',
-      'avatars.githubusercontent.com',
-      'ui-avatars.com',
-      'cloudflare-ipfs.com',
-      'loremflickr.com',
-      'i.pravatar.cc',
-      'robohash.org',
-      'avatars.dicebear.com',
-      'api.adorable.io',
-      'placeimg.com',
-      'placekitten.com',
-      'placebear.com',
-      'placecorgi.com',
-      'placedog.net',
-      'placesheen.com',
-      'baconmockup.com',
-      'placebeard.it',
-      'fillmurray.com',
-      'placecage.com',
-      'stevensegallery.com',
-      'placebacon.net',
-      'placepuppy.it',
-      'placeimg.com',
-      'picsum.photos',
-      'fastly.picsum.photos',
-      'images.pexels.com',
-      'pixabay.com',
-      'cdn.pixabay.com',
-      'media.giphy.com',
-      'giphy.com',
-      'tenor.com',
-      'media.tenor.com',
-      'media1.tenor.com',
-      'media2.tenor.com',
-      'media3.tenor.com',
-      'media4.tenor.com',
-      'media5.tenor.com',
-      'media6.tenor.com',
-      'media7.tenor.com',
-      'media8.tenor.com',
-      'media9.tenor.com',
-    ],
+    unoptimized: true,
+    // 以下配置在build时不起作用，但可以在开发模式下帮助优化
+    deviceSizes: [640, 750, 828, 1080, 1200, 1920, 2048],
+    imageSizes: [16, 32, 48, 64, 96, 128, 256, 384],
+    formats: ['image/webp', 'image/avif'],
+    minimumCacheTTL: 86400, // 24小时缓存
+    dangerouslyAllowSVG: true,
+    contentSecurityPolicy: "default-src 'self'; script-src 'none'; sandbox;",
     remotePatterns: [
       {
         protocol: 'https',
         hostname: '**',
       },
     ],
-    unoptimized: true, // 静态导出时需要设置为true
   },
+  
+  // 移除所有实验性功能，避免冲突
   experimental: {
-    serverActions: {
-      allowedOrigins: ['localhost:3000', '*'],
-    },
+    // 只保留必要的滚动恢复
+    scrollRestoration: true,
+    // 启用内存缓存优化
+    optimizeCss: true,
+    // 优化大型包的导入，减少 bundle 体积
+    optimizePackageImports: [
+      'lucide-react',
+      'date-fns',
+      '@radix-ui/react-accordion',
+      '@radix-ui/react-alert-dialog',
+      '@radix-ui/react-avatar',
+      '@radix-ui/react-checkbox',
+      '@radix-ui/react-collapsible',
+      '@radix-ui/react-context-menu',
+      '@radix-ui/react-dialog',
+      '@radix-ui/react-dropdown-menu',
+      '@radix-ui/react-hover-card',
+      '@radix-ui/react-label',
+      '@radix-ui/react-menubar',
+      '@radix-ui/react-navigation-menu',
+      '@radix-ui/react-popover',
+      '@radix-ui/react-progress',
+      '@radix-ui/react-radio-group',
+      '@radix-ui/react-scroll-area',
+      '@radix-ui/react-select',
+      '@radix-ui/react-separator',
+      '@radix-ui/react-slot',
+      '@radix-ui/react-switch',
+      '@radix-ui/react-tabs',
+      '@radix-ui/react-toast',
+      '@radix-ui/react-tooltip',
+    ],
+  },
+  
+  // 性能优化: 在生产环境中移除console.log
+  compiler: {
+    removeConsole: process.env.NODE_ENV === 'production' ? {
+      exclude: ['error', 'warn'],
+    } : false,
+  },
+  
+  // 自定义webpack配置，优化资源加载
+  webpack: (config, { dev, isServer }) => {
+    // 只在客户端构建中应用以下优化
+    if (!isServer) {
+      // 优化图片资源
+      config.module.rules.push({
+        test: /\.(png|jpe?g|gif|webp)$/i,
+        use: [
+          {
+            loader: 'image-webpack-loader',
+            options: {
+              disable: dev,
+              mozjpeg: {
+                progressive: true,
+                quality: 80,
+              },
+              optipng: {
+                enabled: true,
+              },
+              pngquant: {
+                quality: [0.65, 0.90],
+                speed: 4,
+              },
+              gifsicle: {
+                interlaced: false,
+              },
+              webp: {
+                quality: 80,
+              },
+            },
+          },
+        ],
+      });
+    }
+    
+    return config;
   },
 }
 
-export default nextConfig
+export default nextConfig 

@@ -1,109 +1,181 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useCallback, useEffect, useRef } from "react" // 添加useRef
 import PostCard from "./post-card"
+import VirtualPostList from "./virtual-post-list"
 import type { Post } from "@/lib/types"
-import { subscribeToPostsUpdates } from "@/lib/supabase"
-import { useAuth } from "@/contexts/auth-context"
-import { Loader2 } from "lucide-react"
+import { motion } from "framer-motion"
+import { useSimpleAuth } from "@/contexts/auth-context-simple"
+import { PulseLoading } from "./ui/loading-animation"
+import { usePosts } from "@/contexts/posts-context"
+import { Button } from "./ui/button"
+import { RefreshCw, AlertTriangle } from "lucide-react"
+
+// 定义每页加载的帖子数
+const PAGE_SIZE = 30
 
 export default function PostGrid() {
-  const [posts, setPosts] = useState<Post[]>([])
-  const [loading, setLoading] = useState(true)
   const [activePostId, setActivePostId] = useState<string | null>(null)
-  const { user } = useAuth()
-
+  const { user } = useSimpleAuth()
+  const { state, loadMorePosts, updatePost, deletePost, retryLoading } = usePosts()
+  
+  // 从context中获取状态
+  const { posts, isLoading, hasMore, error } = state
+  
+  // 添加用于追踪上次用户ID的引用
+  const lastUserIdRef = useRef<string | null>(null);
+  
+  // 添加认证状态变化监听,在登录或注销后重新加载帖子
   useEffect(() => {
-    setLoading(true)
-
-    // 使用实时订阅替代单次加载
-    const unsubscribe = subscribeToPostsUpdates((fetchedPosts) => {
-      setPosts(fetchedPosts)
-      setLoading(false)
-    })
-
-    // 清理函数
+    // 监听自定义认证状态变化事件
+    const handleAuthChange = () => {
+      console.log('🔄 PostGrid: 检测到认证状态变化事件');
+      retryLoading();
+    };
+    
+    // 监听本地存储变化
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'auth_refresh_timestamp') {
+        console.log('🔄 PostGrid: 检测到认证刷新时间戳变化');
+        retryLoading();
+      }
+    };
+    
+    window.addEventListener('auth-state-changed', handleAuthChange);
+    window.addEventListener('storage', handleStorageChange);
+    
     return () => {
-      unsubscribe()
+      window.removeEventListener('auth-state-changed', handleAuthChange);
+      window.removeEventListener('storage', handleStorageChange);
+    };
+  }, [retryLoading]);
+  
+  // 当登录状态"真正"改变时重新加载帖子
+  useEffect(() => {
+    const currentUserId = user?.id || null;
+    
+    if (currentUserId !== lastUserIdRef.current) {
+      console.log('👤 PostGrid: 用户ID变化，重新获取帖子数据');
+      lastUserIdRef.current = currentUserId;
+      retryLoading();
     }
-  }, [])
+  }, [user?.id, retryLoading]);
+  
+  // 处理加载更多帖子 - 包装loadMorePosts以适配新API
+  const handleLoadMorePosts = useCallback(
+    (page: number, limit: number) => {
+      return loadMorePosts(page, limit)
+    },
+    [loadMorePosts]
+  )
+  
+  // 处理帖子点击
+  const handlePostClick = useCallback((postId: string) => {
+    const savedScrollPosition = window.scrollY || document.documentElement.scrollTop || 0;
+    
+    // 保存滚动位置到sessionStorage，以便页面刷新时恢复
+    if (typeof window !== 'undefined' && typeof sessionStorage !== 'undefined') {
+      sessionStorage.setItem('forumScrollPosition', savedScrollPosition.toString());
+      sessionStorage.setItem('modalOpen', 'true');
+    }
+    
+    setActivePostId(postId);
+  }, []);
 
-  const handlePostClick = (postId: string) => {
-    setActivePostId(postId)
-  }
+  // 处理帖子关闭
+  const handleClosePost = useCallback(() => {
+    setActivePostId(null);
+    
+    if (typeof sessionStorage !== 'undefined') {
+      sessionStorage.removeItem('modalOpen');
+      // 不主动恢复滚动位置，让子组件自己处理
+    }
+  }, []);
 
-  const handleClosePost = () => {
-    setActivePostId(null)
-  }
+  // 处理帖子更新
+  const handlePostUpdated = useCallback((postId: string, updates: Partial<Post>) => {
+    updatePost(postId, updates);
+  }, [updatePost]);
 
-  const handlePostUpdated = (postId: string, updates: Partial<Post>) => {
-    setPosts((prevPosts) => prevPosts.map((post) => (post.id === postId ? { ...post, ...updates } : post)))
-  }
+  // 处理帖子删除
+  const handlePostDeleted = useCallback((postId: string) => {
+    deletePost(postId);
+    // 如果当前正在查看的帖子被删除，关闭详情视图
+    if (activePostId === postId) {
+      setActivePostId(null);
+    }
+  }, [deletePost, activePostId]);
 
-  const handlePostDeleted = (postId: string) => {
-    setPosts((prevPosts) => prevPosts.filter((post) => post.id !== postId))
-  }
+  // 处理重试加载
+  const handleRetry = useCallback(() => {
+    retryLoading();
+  }, [retryLoading]);
 
-  if (loading) {
-    return (
-      <div className="flex justify-center items-center min-h-[300px]">
-        <Loader2 className="h-12 w-12 text-lime-500 animate-spin" />
-      </div>
-    )
-  }
-
-  if (posts.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[300px] text-center p-4">
-        <div className="text-4xl mb-4">🌱</div>
-        <h3 className="text-xl font-semibold text-gray-300 mb-2">暂无帖子</h3>
-        <p className="text-gray-500">成为第一个发帖的用户吧！</p>
-      </div>
-    )
-  }
-
-  // 将帖子分为左右两列
-  const leftPosts = posts.filter((_, index) => index % 2 === 0)
-  const rightPosts = posts.filter((_, index) => index % 2 === 1)
+  // 调试日志（仅开发模式输出一次，避免刷屏）
+  useEffect(() => {
+    if (process.env.NODE_ENV === 'development' && error) {
+      console.log('🔍 PostGrid 加载异常:', { postsCount: posts.length, error });
+    }
+  }, [error, posts.length]);
 
   return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(2, 1fr)",
-        gap: "12px",
-        padding: "12px",
-        width: "100%",
-      }}
-    >
-      <div>
-        {leftPosts.map((post) => (
-          <div key={post.id} style={{ marginBottom: "12px" }}>
-            <PostCard
-              post={post}
-              isActive={activePostId === post.id}
-              onClick={() => handlePostClick(post.id)}
-              onClose={handleClosePost}
-              onPostUpdated={handlePostUpdated}
-              onPostDeleted={handlePostDeleted}
-            />
+    <div className="post-grid-container w-full max-w-7xl mx-auto pb-20">
+      {/* 加载中状态 */}
+      {isLoading && posts.length === 0 && (
+        <div className="flex justify-center items-center h-32">
+          <PulseLoading />
+        </div>
+      )}
+
+      {/* 错误状态 */}
+      {error && (
+        <div className="flex flex-col items-center justify-center py-8 text-center mx-auto px-4">
+          <div className="flex items-center mb-4 text-red-500">
+            <AlertTriangle className="mr-2" />
+            <span>加载出错</span>
           </div>
-        ))}
-      </div>
-      <div>
-        {rightPosts.map((post) => (
-          <div key={post.id} style={{ marginBottom: "12px" }}>
-            <PostCard
-              post={post}
-              isActive={activePostId === post.id}
-              onClick={() => handlePostClick(post.id)}
-              onClose={handleClosePost}
-              onPostUpdated={handlePostUpdated}
-              onPostDeleted={handlePostDeleted}
-            />
-          </div>
-        ))}
-      </div>
+          <p className="text-gray-600 mb-4">{error}</p>
+          <Button 
+            onClick={handleRetry} 
+            variant="outline"
+            size="sm"
+            className="flex items-center"
+          >
+            <RefreshCw className="w-4 h-4 mr-2" /> 
+            重试加载
+          </Button>
+        </div>
+      )}
+
+      {/* 帖子网格 */}
+      {posts.length > 0 && (
+        <div
+          className="post-grid-layout w-full px-4"
+          style={{ opacity: 1, visibility: 'visible', display: 'block' }}
+        >
+          {/* 虚拟化列表组件 */}
+          <VirtualPostList
+            posts={posts}
+            loadMorePosts={handleLoadMorePosts}
+            hasMore={hasMore}
+            loading={isLoading}
+            activePostId={activePostId}
+            onPostClick={handlePostClick}
+            onPostClose={handleClosePost}
+            onPostUpdated={handlePostUpdated}
+            onPostDeleted={handlePostDeleted}
+            pageSize={PAGE_SIZE}
+          />
+        </div>
+      )}
+
+      {/* 无内容状态 */}
+      {!isLoading && !error && posts.length === 0 && (
+        <div className="flex flex-col items-center justify-center h-64 text-gray-500">
+          <p className="text-xl mb-4">暂无帖子</p>
+          <p className="text-sm">成为第一个发帖的人吧</p>
+        </div>
+      )}
     </div>
   )
 }

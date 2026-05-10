@@ -1,0 +1,177 @@
+
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap');
+
+  #terminal {
+    background: #000;
+    border-radius: 12px;
+    border: 1px solid #0ff3;
+    padding: 20px 24px;
+    min-height: 420px;
+    overflow: hidden;
+    position: relative;
+    font-family: 'Share Tech Mono', 'Courier New', monospace;
+    font-size: 14px;
+    line-height: 2;
+  }
+
+  #terminal::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(0deg, transparent, transparent 28px, rgba(0,255,255,0.015) 28px, rgba(0,255,255,0.015) 29px);
+    pointer-events: none;
+    border-radius: 12px;
+  }
+
+  .line {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    animation: fadeIn 0.3s ease;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateX(-6px); }
+    to   { opacity: 1; transform: translateX(0); }
+  }
+
+  .prefix {
+    font-weight: bold;
+    flex-shrink: 0;
+  }
+
+  .cyan   { color: #0ff; text-shadow: 0 0 6px #0ff, 0 0 14px #0ff, 0 0 30px #0af; }
+  .green  { color: #0f8; text-shadow: 0 0 6px #0f8, 0 0 14px #0f8, 0 0 30px #0f4; }
+  .pink   { color: #f0f; text-shadow: 0 0 6px #f0f, 0 0 14px #f0f, 0 0 30px #a0f; }
+  .yellow { color: #ff0; text-shadow: 0 0 6px #ff0, 0 0 14px #ff0, 0 0 30px #fa0; }
+  .red    { color: #f44; text-shadow: 0 0 6px #f44, 0 0 18px #f00, 0 0 35px #f00; }
+
+  @keyframes flicker {
+    0%,90%,100% { opacity:1; }
+    92% { opacity:0.3; }
+    94% { opacity:1; }
+    96% { opacity:0.5; }
+  }
+
+  .flicker { animation: flicker 4s infinite; }
+
+  .cursor {
+    display: inline-block;
+    width: 8px;
+    height: 14px;
+    background: #0ff;
+    box-shadow: 0 0 8px #0ff, 0 0 18px #0ff;
+    animation: blink 1s step-end infinite;
+    vertical-align: middle;
+    margin-left: 2px;
+  }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+
+  .bar { letter-spacing: -1px; }
+  .dim { opacity: 0.45; }
+
+  #scroll-wrap {
+    transition: transform 0.35s cubic-bezier(0.22,1,0.36,1);
+  }
+</style>
+
+<div id="terminal" role="region" aria-label="霓虹日语终端演示">
+  <div id="scroll-wrap"></div>
+</div>
+
+<script>
+const wrap = document.getElementById('scroll-wrap');
+
+const prefixes = [
+  { sym: '>>>',  cls: 'cyan'   },
+  { sym: '///',  cls: 'green'  },
+  { sym: '###',  cls: 'pink'   },
+  { sym: ':::',  cls: 'yellow' },
+  { sym: '[!]',  cls: 'red'    },
+  { sym: '<<<',  cls: 'cyan'   },
+];
+
+const lines = [
+  { text: 'システム起動中...             BOOT OK',         cls: 'cyan',   p: '>>>' },
+  { text: 'ネットワーク接続完了          ██████ 100%',      cls: 'green',  p: '>>>' },
+  { text: 'データ転送プロトコル確立',                        cls: 'cyan',   p: '///' },
+  { text: 'ユーザー認証: 承認済み         ✓ GRANTED',       cls: 'green',  p: '>>>' },
+  { text: 'セキュリティスキャン実行中... ██░░░░  33%',       cls: 'yellow', p: ':::' },
+  { text: '警告: 不明なアクセスを検出',                      cls: 'red',    p: '[!]' },
+  { text: 'ファイアウォール: 有効化       SHIELD ON',        cls: 'pink',   p: '###' },
+  { text: 'メモリ使用率: 72%            ████░░  72%',       cls: 'yellow', p: '>>>' },
+  { text: '暗号化キー生成: 完了',                            cls: 'green',  p: '///' },
+  { text: 'サーバーへ接続中...          ↯ SYNC',            cls: 'cyan',   p: '<<<' },
+  { text: 'パッチ適用 v4.2.1',                              cls: 'pink',   p: '###' },
+  { text: 'トランザクション記録中       REC ●',              cls: 'red',    p: '[!]' },
+  { text: 'ニューラルリンク確立',                             cls: 'cyan',   p: '>>>' },
+  { text: 'ゾーン: アルファ / レベル 9',                     cls: 'pink',   p: '###' },
+  { text: 'データストリーム開始         >>>>>>>>>>>',        cls: 'green',  p: '>>>' },
+  { text: '量子暗号プロトコル稼働中',                         cls: 'yellow', p: ':::' },
+  { text: 'バイオメトリクス照合: 完了',                       cls: 'green',  p: '>>>' },
+  { text: '侵入検知: レベルMAX !!!!',                        cls: 'red',    p: '[!]' },
+  { text: 'アクセスログ記録 ID#7749',                        cls: 'cyan',   p: '///' },
+  { text: '送信完了 ← → ↑ ↓ <<<>>>',                       cls: 'pink',   p: '<<<' },
+];
+
+let idx = 0;
+let rendered = [];
+const MAX_LINES = 13;
+
+function colorClass(cls) {
+  return cls;
+}
+
+function addLine() {
+  const entry = lines[idx % lines.length];
+  idx++;
+
+  const row = document.createElement('div');
+  row.className = 'line';
+
+  const pre = document.createElement('span');
+  pre.className = `prefix ${entry.cls} flicker`;
+  pre.textContent = entry.p;
+
+  const txt = document.createElement('span');
+  txt.className = entry.cls;
+  txt.textContent = entry.text;
+
+  row.appendChild(pre);
+  row.appendChild(txt);
+  wrap.appendChild(row);
+  rendered.push(row);
+
+  if (rendered.length > MAX_LINES) {
+    const old = rendered.shift();
+    old.style.opacity = '0';
+    old.style.transition = 'opacity 0.3s';
+    setTimeout(() => old.remove(), 320);
+  }
+
+  const cursorRow = wrap.querySelector('.cursor-line');
+  if (cursorRow) cursorRow.remove();
+
+  const cline = document.createElement('div');
+  cline.className = 'line cursor-line';
+  const cpre = document.createElement('span');
+  cpre.className = 'prefix cyan dim';
+  cpre.textContent = '>>>';
+  const cur = document.createElement('span');
+  cur.className = 'cursor';
+  cline.appendChild(cpre);
+  cline.appendChild(cur);
+  wrap.appendChild(cline);
+}
+
+function tick() {
+  addLine();
+  const delay = 600 + Math.random() * 800;
+  setTimeout(tick, delay);
+}
+
+tick();
+</script>

@@ -3,14 +3,18 @@
 import type React from "react"
 
 import { useState } from "react"
-import { useRouter } from "next/navigation"
-import Link from "next/link"
-import { useAuth } from "@/contexts/auth-context"
+import { useRouter, useSearchParams } from "next/navigation"
+import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Loader2 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
+import { supabase } from "@/lib/supabaseClient"
+import Link from "next/link"
+import { cn } from "@/lib/utils"
+import { LoadingAnimation } from "./ui/loading-animation"
+import { usePosts } from "@/contexts/posts-context" // 添加引入usePosts
 
 export default function LoginForm() {
   const [email, setEmail] = useState("")
@@ -18,8 +22,9 @@ export default function LoginForm() {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const router = useRouter()
-  const { signIn, connectionStatus } = useAuth()
+  const { signIn } = useSimpleAuth()
   const { toast } = useToast()
+  const { loadPosts, retryLoading } = usePosts() // 获取帖子加载方法
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -30,26 +35,51 @@ export default function LoginForm() {
       return
     }
 
-    // 检查连接状态
-    if (connectionStatus === "disconnected") {
-      toast({
-        title: "连接错误",
-        description: "无法连接到服务器，请检查网络连接后重试",
-        variant: "destructive",
-      })
-      return
-    }
-
     try {
       setIsLoading(true)
+      console.log('🔐 LoginForm: 开始登录流程...')
+      
       const { error } = await signIn(email, password)
 
       if (error) {
+        console.error('❌ LoginForm: 登录失败:', error.message)
         setError(error.message || "登录失败，请检查您的凭据")
       } else {
-        router.push("/")
+        console.log('✅ LoginForm: 登录成功')
+        
+        // 登录成功后，等待一下让会话状态同步
+        await new Promise(resolve => setTimeout(resolve, 500))
+        
+        // 检查session状态
+        const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
+        
+        if (sessionError) {
+          console.error('❌ LoginForm: 会话检查失败:', sessionError.message)
+        } else if (sessionData?.session) {
+          console.log('✅ LoginForm: 会话验证成功:', sessionData.session.user.id)
+          
+          // 成功消息
+          toast({
+            title: "登录成功",
+            description: "正在跳转...",
+          })
+          
+          // 简化登录后的处理：直接刷新页面到首页
+          // 这样可以确保所有状态都是干净的，避免任何缓存或状态问题
+          console.log('🔄 登录成功: 刷新页面到首页');
+          window.location.href = '/';
+        } else {
+          console.warn('⚠️ LoginForm: 登录成功但会话为空')
+          // 如果没有会话，保持在登录页面，给用户反馈
+          toast({
+            title: "登录状态异常",
+            description: "请稍后再试",
+            variant: "destructive",
+          })
+        }
       }
     } catch (err: any) {
+      console.error('💥 LoginForm: 登录异常:', err.message)
       setError(err.message || "登录过程中发生错误")
     } finally {
       setIsLoading(false)
@@ -62,15 +92,8 @@ export default function LoginForm() {
         <h1 className="text-3xl font-bold text-lime-400">欢迎回来</h1>
         <p className="text-gray-400">请登录您的账号</p>
       </div>
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form id="login-form" onSubmit={handleSubmit} className="space-y-4">
         {error && <div className="p-3 rounded-md bg-red-900/30 text-red-400 text-sm">{error}</div>}
-
-        {connectionStatus === "checking" && (
-          <div className="p-3 rounded-md bg-yellow-900/30 text-yellow-400 text-sm flex items-center">
-            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-            正在检查连接状态...
-          </div>
-        )}
 
         <div className="space-y-2">
           <Label htmlFor="email">邮箱</Label>
@@ -103,11 +126,15 @@ export default function LoginForm() {
         </div>
         <Button
           type="submit"
-          className="w-full bg-lime-600 hover:bg-lime-700 text-white"
-          disabled={isLoading || connectionStatus === "checking"}
+          className={cn("w-full bg-lime-600 hover:bg-lime-700 text-white")}
+          disabled={isLoading}
         >
-          {isLoading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
-          {isLoading ? "登录中..." : "登录"}
+          {isLoading ? (
+            <span className="flex items-center">
+              <LoadingAnimation size="sm" color="text-background" />
+              <span className="ml-2">登录中...</span>
+            </span>
+          ) : "登录"}
         </Button>
       </form>
       <div className="text-center text-sm">

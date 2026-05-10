@@ -1,22 +1,25 @@
 "use client"
 
-import type React from "react"
-
 import { useState, useCallback } from "react"
-import { Textarea } from "@/components/ui/textarea"
 import { Button } from "@/components/ui/button"
-import { Send, Loader2 } from "lucide-react"
-import { useAuth } from "@/contexts/auth-context"
+import { Textarea } from "@/components/ui/textarea"
 import { addComment } from "@/lib/supabase"
+import { addCommentOptimized } from "@/lib/supabase-optimized"
+import { Loader2, Send } from "lucide-react"
+import type { Comment } from "@/lib/types"
+import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { useToast } from "@/hooks/use-toast"
 
 interface CommentFormProps {
   postId: string
   parentId?: string
-  onCommentAdded: () => void
+  onCommentAdded: (comment: any, content?: string) => void
   onCancel?: () => void
   isReply?: boolean
   replyingTo?: string
+  optimized?: boolean // 是否使用优化模式
+  isPinned?: boolean  // 是否是置顶帖子
+  isAdmin?: boolean   // 当前用户是否是管理员
 }
 
 export default function CommentForm({
@@ -26,13 +29,19 @@ export default function CommentForm({
   onCancel,
   isReply = false,
   replyingTo,
+  optimized = false,
+  isPinned = false,
+  isAdmin = false,
 }: CommentFormProps) {
   const [content, setContent] = useState("")
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const { user } = useAuth()
+  const { user } = useSimpleAuth()
   const { toast } = useToast()
 
-  // 处理评论提交 - 使用useCallback优化，添加乐观更新
+  // 判断是否可以评论
+  const canComment = !isPinned || isAdmin
+
+  // 处理评论提交 - 静态导出环境优化版本
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault()
@@ -41,6 +50,16 @@ export default function CommentForm({
         toast({
           title: "请先登录",
           description: "发表评论前请先登录账号",
+          variant: "destructive",
+        })
+        return
+      }
+      
+      // 检查是否有权限在置顶帖子中评论
+      if (isPinned && !isAdmin) {
+        toast({
+          title: "无权限评论",
+          description: "置顶帖子仅管理员可评论",
           variant: "destructive",
         })
         return
@@ -57,38 +76,92 @@ export default function CommentForm({
       try {
         setIsSubmitting(true)
 
-        // 保存评论内容的副本，然后立即清空输入框
-        const commentContent = content
-        setContent("")
+        // 保存评论内容的副本
+        const commentContent = content.trim()
+        
+        // 在静态导出环境下，使用简化的提交流程
+        if (optimized) {
+          // 优化模式：立即乐观更新UI
+          console.log(`[评论表单] 静态导出环境优化模式提交评论`)
+          
+          // 立即清空输入框
+          setContent("")
+          
+          // 立即通知父组件进行乐观更新
+          onCommentAdded(null, commentContent)
+          
+          // 如果是回复模式，立即关闭回复表单
+          if (isReply && onCancel) {
+            onCancel()
+          }
+          
+          // 显示加载消息
+          toast({
+            title: isReply ? "回复成功" : "评论成功",
+            description: isReply ? "您的回复已发布" : "您的评论已发布",
+          })
 
-        // 立即通知父组件评论已添加，实现乐观更新
-        onCommentAdded()
-
-        // 如果是回复模式，调用取消回复
-        if (isReply && onCancel) {
-          onCancel()
+          // 后台执行实际的API调用
+          try {
+            const newComment = optimized 
+              ? await addCommentOptimized(postId, user.id, commentContent, parentId)
+              : await addComment(postId, user.id, commentContent, parentId)
+            
+            // 通知父组件真实评论已添加
+            onCommentAdded(newComment)
+            
+            console.log(`[评论表单] 评论提交完全成功，ID: ${newComment.id}`)
+            
+          } catch (bgError: any) {
+            console.error("后台评论提交失败:", bgError)
+            // 不再显示错误提示，只记录日志
+          }
+        } else {
+          // 传统模式：等待服务器响应
+          console.log(`[评论表单] 静态导出环境传统模式提交评论`)
+          
+          const newComment = await addComment(postId, user.id, commentContent, parentId)
+          
+          // 清空输入框
+          setContent("")
+          
+          // 通知父组件
+          onCommentAdded(newComment)
+          
+          // 如果是回复模式，关闭回复表单
+          if (isReply && onCancel) {
+            onCancel()
+          }
+          
+          toast({
+            title: isReply ? "回复成功" : "评论成功",
+            description: isReply ? "您的回复已发布" : "您的评论已发布",
+          })
         }
-
-        // 显示成功消息
-        toast({
-          title: isReply ? "回复成功" : "评论成功",
-          description: isReply ? "您的回复已发布" : "您的评论已发布",
-        })
-
-        // 后台执行实际的API调用
-        await addComment(postId, user.id, commentContent, parentId)
       } catch (error: any) {
         console.error(isReply ? "发表回复失败:" : "发表评论失败:", error)
+        
+        // 静态导出环境下的详细错误处理
+        let errorMessage = "发表时出现错误，请稍后重试"
+        
+        if (error.message?.includes("JWT")) {
+          errorMessage = "登录状态已过期，请重新登录"
+        } else if (error.message?.includes("RLS")) {
+          errorMessage = "没有权限发表评论，请检查登录状态"
+        } else if (error.message?.includes("network") || error.message?.includes("fetch")) {
+          errorMessage = "网络连接失败，请检查网络后重试"
+        }
+        
         toast({
           title: isReply ? "回复失败" : "评论失败",
-          description: error.message || "发表时出现错误，请稍后重试",
+          description: errorMessage,
           variant: "destructive",
         })
       } finally {
         setIsSubmitting(false)
       }
     },
-    [user, content, postId, parentId, isReply, onCommentAdded, onCancel, toast],
+    [user, content, postId, parentId, isReply, onCommentAdded, onCancel, toast, optimized, isPinned, isAdmin],
   )
 
   return (
@@ -130,7 +203,7 @@ export default function CommentForm({
           {isSubmitting ? (
             <>
               <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
-              发送中...
+              {optimized ? "发布中..." : "发送中..."}
             </>
           ) : (
             <>

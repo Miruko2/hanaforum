@@ -1,12 +1,13 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
-import { useAuth } from "@/contexts/auth-context"
+import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { LogOut, User, Settings, Menu, X } from "lucide-react"
+import AppLink from "@/components/app-link"
+import { navigateTo } from "@/lib/app-navigation"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,20 +19,79 @@ import {
 
 export default function Navbar() {
   const pathname = usePathname()
-  const { user, signOut, isAdmin } = useAuth()
+  const { user, signOut, isAdmin } = useSimpleAuth()
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
   const [mounted, setMounted] = useState(false)
-
+  const [isNavVisible, setIsNavVisible] = useState(true)
+  const [lastScrollY, setLastScrollY] = useState(0)
+  const [isScrolled, setIsScrolled] = useState(false)
+  
   // 确保组件在客户端渲染
   useEffect(() => {
     setMounted(true)
   }, [])
 
+  // 处理导航方法
+  const handleNavigation = (path: string) => {
+    setIsMobileMenuOpen(false)
+    navigateTo(path)
+  }
+
+  // 处理登出
+  const handleSignOut = async () => {
+    await signOut()
+    // 登出后导航到首页
+    navigateTo('/', { delay: 300 })
+  }
+
+  // 智能导航栏滚动效果
+  useEffect(() => {
+    if (!mounted) return
+
+    const handleScroll = () => {
+      const currentScrollY = window.scrollY
+      
+      // 更新滚动状态（用于视觉效果）
+      setIsScrolled(currentScrollY > 50)
+      
+      // 在页面顶部时始终显示导航栏
+      if (currentScrollY < 10) {
+        setIsNavVisible(true)
+      }
+      // 向下滚动且超过500px时隐藏导航栏
+      else if (currentScrollY > lastScrollY && currentScrollY > 500) {
+        setIsNavVisible(false)
+        setIsMobileMenuOpen(false) // 隐藏时关闭移动端菜单
+      }
+      // 向上滚动时显示导航栏
+      else if (currentScrollY < lastScrollY) {
+        setIsNavVisible(true)
+      }
+      
+      setLastScrollY(currentScrollY)
+    }
+
+    // 添加节流优化，避免过度触发
+    let ticking = false
+    const throttledHandleScroll = () => {
+      if (!ticking) {
+        requestAnimationFrame(() => {
+          handleScroll()
+          ticking = false
+        })
+        ticking = true
+      }
+    }
+
+    window.addEventListener('scroll', throttledHandleScroll, { passive: true })
+    return () => window.removeEventListener('scroll', throttledHandleScroll)
+  }, [mounted, lastScrollY])
+
   if (!mounted) {
     // 返回一个占位符，避免水合不匹配
     return (
-      <header className="fixed top-0 left-0 right-0 z-40 bg-gray-900/80 backdrop-blur-md border-b border-gray-800">
-        <div className="container mx-auto px-4 h-16 flex items-center justify-between">
+      <header className="fixed top-4 left-4 right-4 z-40 max-w-6xl mx-auto transition-transform duration-300 ease-in-out translate-y-0">
+        <div className="bg-black/20 backdrop-blur-lg border border-white/10 rounded-2xl px-6 h-16 flex items-center justify-between shadow-lg">
           <div className="w-full h-6 bg-gray-800/50 animate-pulse rounded"></div>
         </div>
       </header>
@@ -39,51 +99,57 @@ export default function Navbar() {
   }
 
   return (
-    <header className="fixed top-0 left-0 right-0 z-40 bg-gray-900/80 backdrop-blur-md border-b border-gray-800">
-      <div className="container mx-auto px-4">
+    <header className={cn(
+      "fixed top-4 left-4 right-4 z-40 max-w-6xl mx-auto transition-transform duration-300 ease-in-out",
+      isNavVisible ? "translate-y-0" : "-translate-y-full"
+    )}>
+      <div className={cn(
+        "bg-black/20 backdrop-blur-lg border border-white/10 rounded-2xl px-6 shadow-lg transition-all duration-300",
+        isScrolled && "bg-black/30 shadow-2xl"
+      )}>
         <div className="flex h-16 items-center justify-between">
           <div className="flex items-center">
-            <Link href="/" className="text-xl font-bold text-lime-400 mr-8">
+            <AppLink href="/" className="text-xl font-bold text-lime-400 mr-8">
               萤火虫之国
-            </Link>
+            </AppLink>
 
             {/* 桌面导航 */}
-            <nav className="hidden md:flex space-x-4">
-              <Link
+            <nav className="hidden md:flex space-x-2">
+              <AppLink
                 href="/"
                 className={cn(
-                  "px-3 py-2 text-sm font-medium rounded-md transition-colors",
+                  "px-4 py-2 text-sm font-medium rounded-xl transition-all duration-200",
                   pathname === "/"
-                    ? "bg-lime-900/20 text-lime-400"
-                    : "text-gray-300 hover:text-lime-400 hover:bg-lime-900/10",
+                    ? "bg-lime-400/20 text-lime-400 shadow-lg"
+                    : "text-gray-300 hover:text-lime-400 hover:bg-white/10",
                 )}
               >
                 首页
-              </Link>
+              </AppLink>
               {isAdmin && (
-                <Link
+                <AppLink
                   href="/admin"
                   className={cn(
-                    "px-3 py-2 text-sm font-medium rounded-md transition-colors",
+                    "px-4 py-2 text-sm font-medium rounded-xl transition-all duration-200",
                     pathname === "/admin"
-                      ? "bg-lime-900/20 text-lime-400"
-                      : "text-gray-300 hover:text-lime-400 hover:bg-lime-900/10",
+                      ? "bg-lime-400/20 text-lime-400 shadow-lg"
+                      : "text-gray-300 hover:text-lime-400 hover:bg-white/10",
                   )}
                 >
                   管理
-                </Link>
+                </AppLink>
               )}
-              <Link
+              <AppLink
                 href="/profile"
                 className={cn(
-                  "px-3 py-2 text-sm font-medium rounded-md transition-colors",
+                  "px-4 py-2 text-sm font-medium rounded-xl transition-all duration-200",
                   pathname === "/profile"
-                    ? "bg-lime-900/20 text-lime-400"
-                    : "text-gray-300 hover:text-lime-400 hover:bg-lime-900/10",
+                    ? "bg-lime-400/20 text-lime-400 shadow-lg"
+                    : "text-gray-300 hover:text-lime-400 hover:bg-white/10",
                 )}
               >
                 个人中心
-              </Link>
+              </AppLink>
             </nav>
           </div>
 
@@ -97,41 +163,37 @@ export default function Navbar() {
                     </div>
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-56 bg-gray-900 border-gray-800 text-gray-200">
+                <DropdownMenuContent align="end" className="w-56">
                   <DropdownMenuLabel>
                     <div className="flex flex-col space-y-1">
                       <p className="text-sm font-medium leading-none text-lime-400">
                         {user.user_metadata?.username || "用户"}
-                        {isAdmin && <span className="ml-2 text-xs bg-red-900 text-red-200 px-1 rounded">管理员</span>}
+                        {isAdmin && <span className="ml-2 text-xs bg-red-500/20 text-red-300 px-1.5 py-0.5 rounded border border-red-500/30">管理员</span>}
                       </p>
-                      <p className="text-xs leading-none text-gray-400">{user.email}</p>
+                      <p className="text-xs leading-none text-white/50">{user.email}</p>
                     </div>
                   </DropdownMenuLabel>
-                  <DropdownMenuSeparator className="bg-gray-800" />
+                  <DropdownMenuSeparator />
                   <DropdownMenuItem
-                    className="cursor-pointer hover:bg-gray-800 hover:text-lime-400 focus:bg-gray-800"
-                    asChild
+                    className="hover:text-lime-400"
+                    onClick={() => handleNavigation('/profile')}
                   >
-                    <Link href="/profile">
-                      <User className="mr-2 h-4 w-4" />
-                      <span>个人中心</span>
-                    </Link>
+                    <User className="mr-2 h-4 w-4" />
+                    <span>个人中心</span>
                   </DropdownMenuItem>
                   {isAdmin && (
                     <DropdownMenuItem
-                      className="cursor-pointer hover:bg-gray-800 hover:text-lime-400 focus:bg-gray-800"
-                      asChild
+                      className="hover:text-lime-400"
+                      onClick={() => handleNavigation('/admin')}
                     >
-                      <Link href="/admin">
-                        <Settings className="mr-2 h-4 w-4" />
-                        <span>管理面板</span>
-                      </Link>
+                      <Settings className="mr-2 h-4 w-4" />
+                      <span>管理面板</span>
                     </DropdownMenuItem>
                   )}
-                  <DropdownMenuSeparator className="bg-gray-800" />
+                  <DropdownMenuSeparator />
                   <DropdownMenuItem
-                    className="cursor-pointer text-red-400 hover:bg-gray-800 hover:text-red-300 focus:bg-gray-800"
-                    onClick={() => signOut()}
+                    className="text-red-400 hover:text-red-300"
+                    onClick={handleSignOut}
                   >
                     <LogOut className="mr-2 h-4 w-4" />
                     <span>退出登录</span>
@@ -139,12 +201,12 @@ export default function Navbar() {
                 </DropdownMenuContent>
               </DropdownMenu>
             ) : (
-              <div className="hidden md:flex space-x-2">
-                <Button asChild variant="ghost" className="text-gray-300 hover:text-lime-400">
-                  <Link href="/login">登录</Link>
+              <div className="hidden md:flex space-x-3">
+                <Button asChild variant="ghost" className="text-gray-300 hover:text-lime-400 hover:bg-white/10 rounded-xl transition-all duration-200">
+                  <AppLink href="/login">登录</AppLink>
                 </Button>
-                <Button asChild variant="outline" className="border-lime-700 text-lime-400 hover:bg-lime-900/20">
-                  <Link href="/register">注册</Link>
+                <Button asChild variant="outline" className="border-lime-400/50 text-lime-400 hover:bg-lime-400/20 hover:border-lime-400 rounded-xl shadow-lg transition-all duration-200">
+                  <AppLink href="/register">注册</AppLink>
                 </Button>
               </div>
             )}
@@ -164,66 +226,69 @@ export default function Navbar() {
 
       {/* 移动端菜单 */}
       {isMobileMenuOpen && (
-        <div className="md:hidden bg-gray-900/95 border-b border-gray-800">
-          <div className="container mx-auto px-4 py-3">
-            <nav className="flex flex-col space-y-2">
-              <Link
-                href="/"
-                className={cn(
-                  "px-3 py-2 text-sm font-medium rounded-md transition-colors",
-                  pathname === "/"
-                    ? "bg-lime-900/20 text-lime-400"
-                    : "text-gray-300 hover:text-lime-400 hover:bg-lime-900/10",
-                )}
-                onClick={() => setIsMobileMenuOpen(false)}
-              >
-                首页
-              </Link>
-              {isAdmin && (
-                <Link
-                  href="/admin"
+        <div className="absolute top-full left-0 right-0 mt-2 md:hidden">
+          <div className="bg-black/30 backdrop-blur-lg border border-white/10 rounded-2xl mx-0 shadow-lg">
+            <div className="px-6 py-4">
+              <nav className="flex flex-col space-y-2">
+                <AppLink
+                  href="/"
                   className={cn(
-                    "px-3 py-2 text-sm font-medium rounded-md transition-colors",
-                    pathname === "/admin"
-                      ? "bg-lime-900/20 text-lime-400"
-                      : "text-gray-300 hover:text-lime-400 hover:bg-lime-900/10",
+                    "px-4 py-3 text-sm font-medium rounded-xl transition-all duration-200",
+                    pathname === "/"
+                      ? "bg-lime-400/20 text-lime-400 shadow-lg"
+                      : "text-gray-300 hover:text-lime-400 hover:bg-white/10",
                   )}
                   onClick={() => setIsMobileMenuOpen(false)}
                 >
-                  管理
-                </Link>
-              )}
-              <Link
-                href="/profile"
-                className={cn(
-                  "px-3 py-2 text-sm font-medium rounded-md transition-colors",
-                  pathname === "/profile"
-                    ? "bg-lime-900/20 text-lime-400"
-                    : "text-gray-300 hover:text-lime-400 hover:bg-lime-900/10",
+                  首页
+                </AppLink>
+                {isAdmin && (
+                  <AppLink
+                    href="/admin"
+                    className={cn(
+                      "px-4 py-3 text-sm font-medium rounded-xl transition-all duration-200",
+                      pathname === "/admin"
+                        ? "bg-lime-400/20 text-lime-400 shadow-lg"
+                        : "text-gray-300 hover:text-lime-400 hover:bg-white/10",
+                    )}
+                    onClick={() => setIsMobileMenuOpen(false)}
+                  >
+                    管理
+                  </AppLink>
                 )}
-                onClick={() => setIsMobileMenuOpen(false)}
-              >
-                个人中心
-              </Link>
-              {!user && (
-                <>
-                  <Link
-                    href="/login"
-                    className="px-3 py-2 text-sm font-medium rounded-md text-gray-300 hover:text-lime-400 hover:bg-lime-900/10"
-                    onClick={() => setIsMobileMenuOpen(false)}
-                  >
-                    登录
-                  </Link>
-                  <Link
-                    href="/register"
-                    className="px-3 py-2 text-sm font-medium rounded-md text-lime-400 bg-lime-900/20 hover:bg-lime-900/30"
-                    onClick={() => setIsMobileMenuOpen(false)}
-                  >
-                    注册
-                  </Link>
-                </>
-              )}
-            </nav>
+                <AppLink
+                  href="/profile"
+                  className={cn(
+                    "px-4 py-3 text-sm font-medium rounded-xl transition-all duration-200",
+                    pathname === "/profile"
+                      ? "bg-lime-400/20 text-lime-400 shadow-lg"
+                      : "text-gray-300 hover:text-lime-400 hover:bg-white/10",
+                  )}
+                  onClick={() => setIsMobileMenuOpen(false)}
+                >
+                  个人中心
+                </AppLink>
+                
+                {!user && (
+                  <>
+                    <AppLink
+                      href="/login"
+                      className="px-4 py-3 text-sm font-medium rounded-xl text-gray-300 hover:text-lime-400 hover:bg-white/10 transition-all duration-200"
+                      onClick={() => setIsMobileMenuOpen(false)}
+                    >
+                      登录
+                    </AppLink>
+                    <AppLink
+                      href="/register"
+                      className="px-4 py-3 text-sm font-medium rounded-xl text-lime-400 bg-lime-400/20 hover:bg-lime-400/30 shadow-lg transition-all duration-200"
+                      onClick={() => setIsMobileMenuOpen(false)}
+                    >
+                      注册
+                    </AppLink>
+                  </>
+                )}
+              </nav>
+            </div>
           </div>
         </div>
       )}

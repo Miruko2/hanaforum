@@ -1,44 +1,54 @@
-import type React from "react"
-import type { Metadata, Viewport } from "next"
+import type { Metadata } from "next"
+import { Inter } from "next/font/google"
 import "./globals.css"
-import { ThemeProvider } from "@/components/theme-provider"
-import { AuthProvider } from "@/contexts/auth-context"
-import { Toaster } from "@/components/ui/toaster"
-import Navbar from "@/components/navbar"
+import { Providers } from "@/components/providers"
 
-// 移除 Google Fonts 导入，使用系统字体
-// import { Inter } from 'next/font/google'
-// const inter = Inter({ subsets: ["latin"] })
+const inter = Inter({ subsets: ["latin"] })
 
 export const metadata: Metadata = {
-  title: "萤火虫之国",
-  description: "萤火虫之国",
-  generator: "v0.dev",
-}
-
-export const viewport: Viewport = {
-  width: "device-width",
-  initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
+  title: "论坛",
+  description: "一个简单的论坛应用",
 }
 
 export default function RootLayout({
   children,
-}: Readonly<{
+}: {
   children: React.ReactNode
-}>) {
+}) {
+  // 确保背景图片URL正确，并添加一个不透明度叠加
+  const bgStyle = {
+    backgroundImage: "url('/mos-design-xGc2QsidjHA-unsplash.jpg')",
+    backgroundSize: "cover",
+    backgroundPosition: "center center",
+    backgroundRepeat: "no-repeat",
+    backgroundAttachment: "fixed",
+    position: "relative" as const,
+  };
+
+  // 添加半透明层，确保内容可读性
+  const overlayStyle = {
+    content: '""',
+    position: "absolute" as const,
+    top: 0,
+    left: 0,
+    width: "100%",
+    height: "100%",
+    backgroundColor: "rgba(0, 0, 0, 0.2)", // 轻微暗化背景
+    zIndex: -1,
+    pointerEvents: "none" as const,
+  };
+
   return (
     <html lang="zh-CN" suppressHydrationWarning>
-      {/* 移除 inter.className，使用系统字体 */}
-      <body className="font-sans">
-        <ThemeProvider attribute="class" defaultTheme="dark" enableSystem>
-          <AuthProvider>
-            <Navbar />
-            <main className="pt-16">{children}</main>
-            <Toaster />
-          </AuthProvider>
-        </ThemeProvider>
+      <head>
+        {/* 预加载关键资源，加速首屏渲染 */}
+        <link rel="preload" href="/mos-design-xGc2QsidjHA-unsplash.jpg" as="image" />
+      </head>
+      <body
+        className={`${inter.className} bg-transparent`}
+        style={bgStyle}
+      >
+        <Providers>{children}</Providers>
       </body>
     </html>
   )

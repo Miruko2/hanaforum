@@ -3,19 +3,3 @@ include ':capacitor-cordova-android-plugins'
 project(':capacitor-cordova-android-plugins').projectDir = new File('./capacitor-cordova-android-plugins/')
 
 apply from: 'capacitor.settings.gradle'
-dependencyResolutionManagement {
-  // 将FAIL_ON_PROJECT_REPOS改为PREFER_SETTINGS
-  repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
-  repositories {
-    google()
-    mavenCentral()
-  }
-
-  // 添加这部分
-  versionCatalogs {
-    libs {
-      library('kotlin-stdlib-jdk7', 'org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22')
-      library('kotlin-stdlib-jdk8', 'org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22')
-    }
-  }
-}

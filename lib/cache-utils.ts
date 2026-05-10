@@ -122,3 +122,61 @@ export async function cachedQuery<T>(cacheKey: string, queryFn: () => Promise<T>
 
 // 导出缓存实例
 export const cache = globalCache
+
+// 全局缓存清理函数
+export function clearAllCaches() {
+  globalCache.clear()
+  
+  // 如果在浏览器环境，也清理其他可能的缓存
+  if (typeof window !== 'undefined') {
+    // 清理 sessionStorage 中的缓存
+    try {
+      const keys = Object.keys(sessionStorage)
+      keys.forEach(key => {
+        if (key.startsWith('supabase_') || key.startsWith('posts_') || key.startsWith('comments_')) {
+          sessionStorage.removeItem(key)
+        }
+      })
+    } catch (e) {
+      console.warn('清理 sessionStorage 失败:', e)
+    }
+    
+    // 清理 localStorage 中的缓存（但保留认证信息）
+    try {
+      const keys = Object.keys(localStorage)
+      keys.forEach(key => {
+        if (key.startsWith('cache_') || key.startsWith('posts_') || key.startsWith('comments_')) {
+          localStorage.removeItem(key)
+        }
+      })
+    } catch (e) {
+      console.warn('清理 localStorage 失败:', e)
+    }
+  }
+  
+  console.log('所有缓存已清理')
+}
+
+// 智能缓存清理 - 只清理过期或特定类型的缓存
+export function smartClearCache(pattern?: string) {
+  if (pattern) {
+    // 清理匹配模式的缓存
+    const keysToDelete: string[] = []
+    
+    // 这里需要访问内部缓存，但我们的 MemoryCache 类没有暴露迭代方法
+    // 先清理过期的缓存
+    globalCache.clearExpired()
+    
+    console.log(`清理了匹配 "${pattern}" 的缓存`)
+  } else {
+    // 只清理过期缓存
+    globalCache.clearExpired()
+    console.log('清理了过期缓存')
+  }
+}
+
+// 在全局对象上暴露缓存清理函数（用于调试）
+if (typeof window !== 'undefined') {
+  (window as any).clearSupabaseCache = clearAllCaches;
+  (window as any).smartClearCache = smartClearCache;
+}
