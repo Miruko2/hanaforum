@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { usePathname } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { useSimpleAuth } from "@/contexts/auth-context-simple"
@@ -22,6 +22,7 @@ import { Clapperboard, Zap } from "lucide-react"
 
 export default function Navigation() {
   const pathname = usePathname()
+  const router = useRouter()
   const { user, signOut, isAdmin } = useSimpleAuth()
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
   const [mounted, setMounted] = useState(false)
@@ -66,8 +67,14 @@ export default function Navigation() {
     return () => window.removeEventListener("cinema-mode-changed", onChange)
   }, [mounted])
 
-  // 切换影院模式
+  // 切换影院模式。
+  // 如果当前不在首页，则先跳转到首页并带上 ?cinema=1 参数，
+  // 首页读到这个参数后会自动开启影院模式（见 app/page.tsx）。
   const toggleCinemaMode = () => {
+    if (pathname !== "/") {
+      router.push("/?cinema=1")
+      return
+    }
     const next = !cinemaMode
     setCinemaMode(next)
     window.dispatchEvent(new CustomEvent("cinema-mode-toggle", { detail: { on: next } }))

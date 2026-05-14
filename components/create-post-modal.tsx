@@ -12,20 +12,35 @@ import { createPortal } from "react-dom"
 import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { useToast } from "@/hooks/use-toast"
 import { supabase } from "@/lib/supabaseClient"
+import { updatePost } from "@/lib/supabase"
 import { cn } from "@/lib/utils"
 import { CATEGORIES } from "@/lib/categories"
+import type { Post } from "@/lib/types"
 
 interface CreatePostModalProps {
   onClose: () => void
   onPostCreated: () => void
+  /** 传入时进入编辑模式，对该帖子做更新而不是新建 */
+  editPost?: Post
+  /** 编辑成功时回调，用于父组件就地更新帖子数据 */
+  onPostUpdated?: (postId: string, updates: Partial<Post>) => void
 }
 
-export default function CreatePostModal({ onClose, onPostCreated }: CreatePostModalProps) {
-  const [description, setDescription] = useState("")
-  const [title, setTitle] = useState("")
-  const [category, setCategory] = useState("general")
-  const [imagePreview, setImagePreview] = useState<string | null>(null)
+export default function CreatePostModal({
+  onClose,
+  onPostCreated,
+  editPost,
+  onPostUpdated,
+}: CreatePostModalProps) {
+  const isEditMode = Boolean(editPost)
+
+  const [description, setDescription] = useState(editPost?.description || editPost?.content || "")
+  const [title, setTitle] = useState(editPost?.title || "")
+  const [category, setCategory] = useState(editPost?.category || "general")
+  const [imagePreview, setImagePreview] = useState<string | null>(editPost?.image_url || null)
   const [imageFile, setImageFile] = useState<File | null>(null)
+  // 记录用户是否主动移除了原图，以便提交时把 image_url 置空
+  const [imageCleared, setImageCleared] = useState(false)
   const [isMounted, setIsMounted] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -33,7 +48,7 @@ export default function CreatePostModal({ onClose, onPostCreated }: CreatePostMo
   const previousOverflow = useRef<string>("")
   const { user } = useSimpleAuth()
   const { toast } = useToast()
-  const [imageRatio, setImageRatio] = useState<number>(0.75)
+  const [imageRatio, setImageRatio] = useState<number>(editPost?.image_ratio || 0.75)
   const [isMobile, setIsMobile] = useState(false)
 
   // 客户端挂载检查
@@ -99,6 +114,7 @@ export default function CreatePostModal({ onClose, onPostCreated }: CreatePostMo
       }
 
       setImageFile(file)
+      setImageCleared(false)
       const reader = new FileReader()
       reader.onload = (e) => {
         setImagePreview(e.target?.result as string)
@@ -164,7 +180,7 @@ export default function CreatePostModal({ onClose, onPostCreated }: CreatePostMo
     if (!user) {
       toast({
         title: "请先登录",
-        description: "发布帖子前请先登录账号",
+        description: (isEditMode ? "编辑" : "发布") + "帖子前请先登录账号",
         variant: "destructive",
       })
       return
@@ -184,7 +200,9 @@ export default function CreatePostModal({ onClose, onPostCreated }: CreatePostMo
       console.log("当前用户:", user.id)
 
       // 处理图片上传
-      let image_url = undefined
+      // 新建模式：undefined 表示没图；
+      // 编辑模式：undefined 表示保持原图不变，null 表示清空，字符串表示换新图
+      let image_url: string | null | undefined = undefined
       if (imageFile) {
         try {
           console.log("开始上传图片...")
@@ -192,15 +210,54 @@ export default function CreatePostModal({ onClose, onPostCreated }: CreatePostMo
           console.log("上传的图片URL:", image_url)
         } catch (uploadErr: any) {
           console.error("图片上传过程中出错:", uploadErr)
-          // 显示更详细的错误信息
           toast({
             title: "图片上传失败",
             description: `错误: ${uploadErr.message || "未知错误"}`,
             variant: "destructive",
           })
           setIsSubmitting(false)
-          return // 如果图片上传失败，终止后续操作
+          return
         }
+      } else if (isEditMode && imageCleared) {
+        image_url = null
+      }
+
+      if (isEditMode && editPost) {
+        // 编辑模式：调用 updatePost
+        const updated = await updatePost({
+          postId: editPost.id,
+          title,
+          content: description,
+          description,
+          category,
+          image_url,
+          image_ratio: imageRatio,
+        })
+
+        console.log("帖子更新成功:", updated)
+
+        toast({
+          title: "更新成功",
+          description: "帖子已更新",
+        })
+
+        if (onPostUpdated) {
+          const patch: Partial<Post> = {
+            title,
+            content: description,
+            description,
+            category,
+            image_ratio: imageRatio,
+          }
+          if (image_url !== undefined) {
+            patch.image_url = image_url === null ? undefined : image_url
+          }
+          onPostUpdated(editPost.id, patch)
+        }
+
+        onPostCreated()
+        onClose()
+        return
       }
 
       console.log("准备创建帖子，用户ID:", user.id)
@@ -209,9 +266,9 @@ export default function CreatePostModal({ onClose, onPostCreated }: CreatePostMo
       const result = await createPost({
         title,
         category,
-        description, // 设置description字段
-        content: description, // 同时设置content字段为相同的值
-        image_url,
+        description,
+        content: description,
+        image_url: image_url || undefined,
         image_ratio: imageRatio,
         user_id: user.id,
         likes: 0,
@@ -228,16 +285,15 @@ export default function CreatePostModal({ onClose, onPostCreated }: CreatePostMo
       onPostCreated()
       onClose()
     } catch (error: any) {
-      console.error("发布帖子失败:", error)
+      console.error(isEditMode ? "更新帖子失败:" : "发布帖子失败:", error)
 
-      // 更详细的错误消息
-      let errorMessage = "发布帖子时出现错误，请稍后重试"
+      let errorMessage = (isEditMode ? "更新" : "发布") + "帖子时出现错误，请稍后重试"
       if (error.message) {
         errorMessage = error.message
       }
 
       toast({
-        title: "发布失败",
+        title: isEditMode ? "更新失败" : "发布失败",
         description: errorMessage,
         variant: "destructive",
       })
@@ -264,7 +320,9 @@ export default function CreatePostModal({ onClose, onPostCreated }: CreatePostMo
         onClick={(e) => e.stopPropagation()}
         style={{
           maxHeight: isMobile ? "85vh" : "90vh",
-          width: isMobile ? "calc(100% - 32px)" : "auto",
+          // width 交给 tailwind 的 w-full + max-w-2xl 控制；
+          // 只在移动端用内联 width 避开 16px 边距
+          ...(isMobile ? { width: "calc(100% - 32px)" } : {}),
           background: "rgba(255, 255, 255, 0.07)",
           backdropFilter: "blur(24px) saturate(150%)",
           WebkitBackdropFilter: "blur(24px) saturate(150%)",
@@ -283,7 +341,7 @@ export default function CreatePostModal({ onClose, onPostCreated }: CreatePostMo
         </button>
 
         <div className="p-5">
-          <h3 className="text-xl font-semibold text-white mb-5">创建新帖子</h3>
+          <h3 className="text-xl font-semibold text-white mb-5">{isEditMode ? "编辑帖子" : "创建新帖子"}</h3>
 
           <div className="space-y-4">
             {/* 标题输入 */}
@@ -359,6 +417,7 @@ export default function CreatePostModal({ onClose, onPostCreated }: CreatePostMo
                   onClick={() => {
                     setImagePreview(null)
                     setImageFile(null)
+                    setImageCleared(true)
                   }}
                   disabled={isSubmitting}
                 >
@@ -400,12 +459,12 @@ export default function CreatePostModal({ onClose, onPostCreated }: CreatePostMo
                 {isSubmitting ? (
                   <>
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    发布中...
+                    {isEditMode ? "保存中..." : "发布中..."}
                   </>
                 ) : (
                   <>
                     <Send className="h-4 w-4 mr-2" />
-                    发布帖子
+                    {isEditMode ? "保存修改" : "发布帖子"}
                   </>
                 )}
               </Button>

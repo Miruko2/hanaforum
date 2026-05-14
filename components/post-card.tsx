@@ -418,13 +418,13 @@ const PostCard = memo(function PostCard({
         <CreatePostModal
           editPost={post}
           onClose={() => setShowEditModal(false)}
+          onPostUpdated={(postId, updates) => {
+            if (onPostUpdated) {
+              onPostUpdated(postId, updates)
+            }
+          }}
           onPostCreated={() => {
             setShowEditModal(false)
-            // 刷新帖子数据
-            if (onPostUpdated) {
-              // 触发父组件刷新
-              window.location.reload()
-            }
           }}
         />
       )}

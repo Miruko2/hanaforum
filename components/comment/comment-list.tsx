@@ -341,7 +341,7 @@ export default function CommentList({
   return (
     <div className="mt-6 space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-lg font-semibold text-white neon-text flex items-center">
+        <h3 className="text-lg font-semibold text-white flex items-center">
           评论区
           {!loading && <span className="ml-2 text-sm text-gray-400">({totalComments})</span>}
         </h3>

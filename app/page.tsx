@@ -47,6 +47,19 @@ export default function HomePage() {
     )
   }, [cinemaMode])
 
+  // 读 URL ?cinema=1 参数，自动开启影院模式（从其他页面跳转过来时触发）
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const params = new URLSearchParams(window.location.search)
+    if (params.get("cinema") === "1") {
+      setCinemaMode(true)
+      // 清掉 URL 里的 cinema 参数，避免刷新后重复触发
+      const url = new URL(window.location.href)
+      url.searchParams.delete("cinema")
+      window.history.replaceState({}, "", url.toString())
+    }
+  }, [])
+
   // 客户端挂载后读一次 URL，并监听浏览器前进/后退（popstate）
   useEffect(() => {
     setActiveCategory(readCategoryFromURL())

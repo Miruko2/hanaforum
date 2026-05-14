@@ -253,7 +253,7 @@ export function GlassMorph({
           ? `rgba(255, 255, 255, ${hoverBorderOpacity})` 
           : `rgba(255, 255, 255, ${baseBorderOpacity})`,
         boxShadow: isHovered
-          ? `0 10px 30px rgba(0, 0, 0, 0.3), 0 0 20px rgba(${dark ? '132, 204, 22' : '255, 255, 255'}, 0.1)`
+          ? `0 10px 30px rgba(0, 0, 0, 0.3), 0 0 20px rgba(255, 255, 255, 0.1)`
           : "0 4px 20px rgba(0, 0, 0, 0.2)"
       }}
       transition={{
@@ -319,7 +319,7 @@ export function GlassMorph({
           className="absolute inset-0 pointer-events-none z-0"
           animate={{
             boxShadow: isHovered
-              ? `inset 0 0 20px rgba(${dark ? '132, 204, 22' : '255, 255, 255'}, 0.1)`
+              ? `inset 0 0 20px rgba(255, 255, 255, 0.1)`
               : "none",
             opacity: isHovered ? 1 : 0
           }}

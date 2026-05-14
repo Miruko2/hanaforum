@@ -11,6 +11,12 @@ import { ArrowLeft, Send } from "lucide-react"
 import { supabase } from "@/lib/supabaseClient"
 import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { useToast } from "@/hooks/use-toast"
+import LiveHostStage from "./live-host-stage"
+import {
+  TRIGGER_REGEX,
+  HANAKO_USERNAME,
+  type HanakoEmotion,
+} from "@/lib/hanako/constants"
 
 /** 一条弹幕在数据库中的结构 */
 interface LiveComment {
@@ -21,28 +27,34 @@ interface LiveComment {
   created_at: string
 }
 
-type NeonColor = "cyan" | "green" | "pink" | "yellow" | "red"
+type NeonColor = "cyan" | "green" | "pink" | "yellow" | "red" | "purple" | "orange" | "lime"
 
 interface DisplayComment extends LiveComment {
   colorCls: NeonColor
   prefix: string
   typedChars: number
   done: boolean
+  isAI?: boolean
 }
 
-const NEON_COLORS: NeonColor[] = ["cyan", "green", "pink", "yellow", "red"]
+const NEON_COLORS: NeonColor[] = ["cyan", "green", "pink", "yellow", "red", "purple", "orange", "lime"]
+const USER_COLORS: NeonColor[] = ["cyan", "green", "yellow", "red", "purple", "orange", "lime"]
 const PREFIX_POOL: Record<NeonColor, string[]> = {
   cyan: [">>>", "<<<"],
   green: ["///", ">>>"],
   pink: ["###", "<<<"],
   yellow: [":::"],
   red: ["[!]"],
+  purple: [":::", "~~~"],
+  orange: ["===", "***"],
+  lime: ["+++", "---"],
 }
 
-function hashColor(str: string): NeonColor {
+function hashColor(str: string, excludePink = false): NeonColor {
+  const pool = excludePink ? USER_COLORS : NEON_COLORS
   let h = 0
   for (const ch of str) h = (h * 31 + ch.charCodeAt(0)) | 0
-  return NEON_COLORS[Math.abs(h) % NEON_COLORS.length]
+  return pool[Math.abs(h) % pool.length]
 }
 
 function pickPrefix(color: NeonColor, seed: string): string {
@@ -52,10 +64,10 @@ function pickPrefix(color: NeonColor, seed: string): string {
   return pool[Math.abs(h) % pool.length]
 }
 
-const MAX_DISPLAY = 50
+const MAX_DISPLAY = 100
 const MAX_LENGTH = 50
-const TYPE_SPEED_MS = 85 // 人类打字感
-const TRANSITION_MS = 550 // 卷帘入场/退场时长
+const TYPE_SPEED_MS = 85
+const TRANSITION_MS = 550
 
 export default function LiveWallContent() {
   const router = useRouter()
@@ -72,20 +84,32 @@ export default function LiveWallContent() {
   const [inputFocused, setInputFocused] = useState(false)
   const listRef = useRef<HTMLDivElement>(null)
 
-  // 入场：下一帧触发 translateY(0)，让 CSS 过渡能跑起来
+  // Hanako AI 状态
+  const [hanakoEmotion, setHanakoEmotion] = useState<HanakoEmotion>("neutral")
+  const [hanakoReply, setHanakoReply] = useState("")
+  const [hanakoThinking, setHanakoThinking] = useState(false)
+  const aiPendingRef = useRef(false)
+  const userRef = useRef(user)
+
+  // 保持 userRef 最新
+  useEffect(() => {
+    userRef.current = user
+  }, [user])
+
+  // 入场
   useEffect(() => {
     const rafId = requestAnimationFrame(() => setMounted(true))
     return () => cancelAnimationFrame(rafId)
   }, [])
 
-  // 退场：播完动画再真正跳回
+  // 退场
   const handleBack = useCallback(() => {
     if (closing) return
     setClosing(true)
     setTimeout(() => router.push("/"), TRANSITION_MS)
   }, [closing, router])
 
-  // ESC 键也触发退场
+  // ESC 键
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") handleBack()
@@ -96,16 +120,77 @@ export default function LiveWallContent() {
 
   const toDisplay = useCallback(
     (c: LiveComment, isNew: boolean): DisplayComment => {
-      const colorCls = hashColor(c.id)
+      const isAI = c.username === HANAKO_USERNAME
+      const colorCls = isAI ? "pink" as NeonColor : hashColor(c.id, true)
       return {
         ...c,
         colorCls,
-        prefix: pickPrefix(colorCls, c.id),
+        prefix: isAI ? "[AI]" : pickPrefix(colorCls, c.id),
         typedChars: isNew ? 0 : c.content.length,
         done: !isNew,
+        isAI,
       }
     },
     [],
+  )
+
+  // 触发 AI 回复
+  const commentsRef = useRef(comments)
+  useEffect(() => {
+    commentsRef.current = comments
+  }, [comments])
+
+  const triggerAIReply = useCallback(
+    async (triggerComment: LiveComment) => {
+      if (aiPendingRef.current) return
+      const currentUser = userRef.current
+      if (!currentUser) return
+
+      aiPendingRef.current = true
+      setHanakoThinking(true)
+
+      try {
+        const recent = commentsRef.current
+          .slice(-50)
+          .map((c) => ({ username: c.username, content: c.content }))
+
+        const username =
+          currentUser.user_metadata?.username ||
+          (currentUser.email ? currentUser.email.split("@")[0] : "匿名")
+
+        const res = await fetch("/api/ai-reply", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            userId: currentUser.id,
+            username,
+            content: triggerComment.content,
+            recentMessages: recent,
+          }),
+        })
+
+        if (res.ok) {
+          const data = await res.json()
+          setHanakoEmotion(data.emotion || "neutral")
+          setHanakoReply(data.reply || "")
+        } else {
+          const errData = await res.json().catch(() => ({}))
+          if (res.status === 429 && errData.error) {
+            toast({
+              title: "hanako 正忙",
+              description: errData.error,
+              variant: "destructive",
+            })
+          }
+        }
+      } catch (err) {
+        console.error("[LiveWall] AI 回复请求失败:", err)
+      } finally {
+        setHanakoThinking(false)
+        aiPendingRef.current = false
+      }
+    },
+    [toast],
   )
 
   // 初次加载
@@ -146,6 +231,16 @@ export default function LiveWallContent() {
               ? next.slice(next.length - MAX_DISPLAY)
               : next
           })
+
+          // 检查是否需要触发 AI（只对别人的消息触发，自己的在 handleSend 里已触发）
+          const currentUser = userRef.current
+          if (
+            c.username !== HANAKO_USERNAME &&
+            TRIGGER_REGEX.test(c.content) &&
+            (!currentUser || c.user_id !== currentUser.id)
+          ) {
+            triggerAIReply(c)
+          }
         },
       )
       .on(
@@ -161,7 +256,7 @@ export default function LiveWallContent() {
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [toDisplay])
+  }, [toDisplay, triggerAIReply])
 
   // 打字机推进
   useEffect(() => {
@@ -213,6 +308,11 @@ export default function LiveWallContent() {
       ])
       if (error) throw error
       setInput("")
+
+      // 如果消息包含 @hanako，直接触发 AI 回复（不等 realtime 回声）
+      if (TRIGGER_REGEX.test(content)) {
+        triggerAIReply({ id: "", user_id: user.id, username, content, created_at: "" })
+      }
     } catch (err: any) {
       console.error("[LiveWall] 发送失败:", err)
       toast({
@@ -232,9 +332,9 @@ export default function LiveWallContent() {
     }
   }
 
-  const placeholder = user ? "> 发送弹幕... (Enter 发送)" : "> 登录后发送弹幕"
+  const placeholder = user ? "> 发送弹幕... (Enter 发送)  @hanako 呼叫AI" : "> 登录后发送弹幕"
 
-  // 展示态：已挂载且未关闭
+  // 展示态
   const shown = mounted && !closing
 
   return (
@@ -266,40 +366,55 @@ export default function LiveWallContent() {
         </div>
       </header>
 
-      {/* 消息区 */}
-      <main ref={listRef} className="live-wall-feed">
-        {comments.length === 0 ? (
-          <div className="live-wall-empty">
-            <span className="neon-cyan">&gt;&gt;&gt;</span>
-            <span className="ml-3 opacity-60">等待第一条消息...</span>
-            <span className="live-wall-cursor" />
-          </div>
-        ) : (
-          comments.map((c, i) => (
-            <div key={c.id} className="live-wall-line">
-              <span
-                className={`live-wall-prefix neon-${c.colorCls} flicker-part`}
-                style={{ ["--flicker-delay" as any]: (i * 0.41) % 7 }}
-              >
-                {c.prefix}
-              </span>
-              <span
-                className={`live-wall-user neon-${c.colorCls} flicker-part`}
-                style={{ ["--flicker-delay" as any]: (i * 0.73 + 2.1) % 7 }}
-              >
-                &gt;&gt; {c.username}:
-              </span>
-              <span
-                className={`neon-${c.colorCls} flicker-part`}
-                style={{ ["--flicker-delay" as any]: (i * 1.19 + 4.3) % 7 }}
-              >
-                {c.content.slice(0, c.typedChars)}
-                {!c.done && <span className="live-wall-cursor typing" />}
-              </span>
+      {/* 主体区域：左弹幕 + 右主播 */}
+      <div className="live-wall-body">
+        {/* 左侧弹幕区 */}
+        <main ref={listRef} className="live-wall-feed">
+          {comments.length === 0 ? (
+            <div className="live-wall-empty">
+              <span className="neon-pink">&gt;&gt;&gt;</span>
+              <span className="ml-3 opacity-60">等待第一条消息...</span>
+              <span className="live-wall-cursor" />
             </div>
-          ))
-        )}
-      </main>
+          ) : (
+            comments.map((c, i) => (
+              <div
+                key={c.id}
+                className={`live-wall-line ${c.isAI ? "live-wall-line-ai" : ""}`}
+              >
+                <span
+                  className={`live-wall-prefix neon-${c.colorCls} flicker-part`}
+                  style={{ ["--flicker-delay" as any]: (i * 0.41) % 7 }}
+                >
+                  {c.prefix}
+                </span>
+                <span
+                  className={`live-wall-user neon-${c.colorCls} flicker-part`}
+                  style={{ ["--flicker-delay" as any]: (i * 0.73 + 2.1) % 7 }}
+                >
+                  &gt;&gt; {c.username}:
+                </span>
+                <span
+                  className={`neon-${c.colorCls} flicker-part`}
+                  style={{ ["--flicker-delay" as any]: (i * 1.19 + 4.3) % 7 }}
+                >
+                  {c.content.slice(0, c.typedChars)}
+                  {!c.done && <span className="live-wall-cursor typing" />}
+                </span>
+              </div>
+            ))
+          )}
+        </main>
+
+        {/* 右侧主播舞台 */}
+        <aside className="live-wall-stage">
+          <LiveHostStage
+            emotion={hanakoEmotion}
+            reply={hanakoReply}
+            isThinking={hanakoThinking}
+          />
+        </aside>
+      </div>
 
       {/* 输入框 */}
       <footer className="live-wall-footer">

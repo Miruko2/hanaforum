@@ -4,9 +4,11 @@ const nextConfig = {
   reactStrictMode: false,
   swcMinify: true,
   
-  // 静态导出配置 - 这是核心配置
-  output: 'export',
-  trailingSlash: true,
+  // 静态导出配置 - 仅在生产构建时启用
+  ...(process.env.NODE_ENV === 'production' ? {
+    output: 'export',
+    trailingSlash: true,
+  } : {}),
   
   // 禁用不兼容的功能
   eslint: {
