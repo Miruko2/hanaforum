@@ -4,11 +4,7 @@ const nextConfig = {
   reactStrictMode: false,
   swcMinify: true,
   
-  // 静态导出配置 - 仅在生产构建时启用
-  ...(process.env.NODE_ENV === 'production' ? {
-    output: 'export',
-    trailingSlash: true,
-  } : {}),
+  // Vercel 部署：使用服务端渲染，支持 API 路由
   
   // 禁用不兼容的功能
   eslint: {
