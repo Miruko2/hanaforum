@@ -146,7 +146,7 @@ export default function CommentItem({
   return (
     <div className={`p-4 rounded-lg bg-black/20 border border-gray-800/50 ${level > 0 ? "ml-6" : ""}`}>
       <div className="flex gap-3">
-        <Avatar className="h-8 w-8">
+        <Avatar className="h-8 w-8 avatar-hover-effect">
           <AvatarImage src={avatarUrl || "/placeholder.svg"} />
           <AvatarFallback>{getInitial(displayName)}</AvatarFallback>
         </Avatar>

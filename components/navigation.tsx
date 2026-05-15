@@ -4,9 +4,11 @@ import { useState, useEffect } from "react"
 import { usePathname, useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar"
 import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { LogOut, User, Settings, Menu, X, PlusCircle } from "lucide-react"
 import Link from "next/link"
+import { supabase } from "@/lib/supabaseClient"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -33,11 +35,49 @@ export default function Navigation() {
   const [activeCategory, setActiveCategory] = useState<string | null>(null)
   // 影院模式开关（跨组件通过自定义事件同步）
   const [cinemaMode, setCinemaMode] = useState(false)
+  // 用户头像
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
   
   // 确保组件在客户端渲染
   useEffect(() => {
     setMounted(true)
   }, [])
+
+  // 获取用户头像
+  useEffect(() => {
+    if (!user?.id) {
+      console.log('Navigation: 用户未登录，清除头像')
+      setAvatarUrl(null)
+      return
+    }
+
+    console.log('Navigation: 开始获取头像，用户ID:', user.id)
+
+    const fetchAvatar = async () => {
+      try {
+        const { data, error } = await supabase
+          .from("profiles")
+          .select("avatar_url")
+          .eq("id", user.id)
+          .single()
+
+        console.log('Navigation: 头像查询结果:', { data, error })
+
+        if (!error && data?.avatar_url) {
+          console.log('Navigation: 设置头像URL:', data.avatar_url)
+          setAvatarUrl(data.avatar_url)
+        } else {
+          console.log('Navigation: 未找到头像，使用首字母')
+          setAvatarUrl(null)
+        }
+      } catch (err) {
+        console.error('Navigation: 获取头像异常:', err)
+        setAvatarUrl(null)
+      }
+    }
+
+    fetchAvatar()
+  }, [user?.id])
 
   // 同步 URL 上的 category 参数到本地 state
   useEffect(() => {
@@ -269,10 +309,13 @@ export default function Navigation() {
                 <NotificationBell />
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" className="relative h-8 w-8 rounded-full">
-                      <div className="flex h-full w-full items-center justify-center rounded-full bg-lime-900/30 text-lime-400">
-                        {user.user_metadata?.username?.[0]?.toUpperCase() || user.email?.[0]?.toUpperCase() || "U"}
-                      </div>
+                    <Button variant="ghost" className="relative h-10 w-10 rounded-full p-0">
+                      <Avatar className="h-9 w-9 avatar-breathe cursor-pointer">
+                        <AvatarImage src={avatarUrl || undefined} alt="用户头像" />
+                        <AvatarFallback className="bg-lime-900/30 text-lime-400 text-sm">
+                          {user.user_metadata?.username?.[0]?.toUpperCase() || user.email?.[0]?.toUpperCase() || "U"}
+                        </AvatarFallback>
+                      </Avatar>
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="w-56">

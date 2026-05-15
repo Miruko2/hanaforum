@@ -132,10 +132,10 @@ export default function PostDetailModal({
             <img
               src={avatarUrl}
               alt={username}
-              className="w-9 h-9 rounded-full object-cover border border-white/20"
+              className="w-9 h-9 rounded-full object-cover border border-white/20 avatar-hover-effect"
             />
           ) : (
-            <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-sm font-semibold border border-white/20">
+            <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-sm font-semibold border border-white/20 avatar-hover-effect">
               {username.charAt(0).toUpperCase()}
             </div>
           )}
