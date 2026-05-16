@@ -43,14 +43,11 @@ export const HANAKO_USERNAME = "hanako"
 /** 触发 AI 回复的正则（不区分大小写） */
 export const TRIGGER_REGEX = /@hanako|@花子/i
 
-/** 每用户冷却时间（毫秒） */
-export const USER_COOLDOWN_MS = 15_000
+/** 每用户同时在飞的最大 AI 请求数 */
+export const USER_MAX_CONCURRENT = 1
 
-/** 全局窗口时间（毫秒） */
-export const GLOBAL_WINDOW_MS = 30_000
-
-/** 全局窗口内最大调用次数 */
-export const GLOBAL_MAX_CALLS = 10
+/** 全局同时在飞的最大 AI 请求数 */
+export const GLOBAL_MAX_CONCURRENT = 2
 
 /** AI 回复最大 token */
 export const MAX_REPLY_TOKENS = 200
@@ -62,4 +59,5 @@ export const MAX_REPLY_TOKENS = 200
  */
 export const ALLOWED_USER_IDS: string[] = [
   "4345c6d0-05eb-4bc3-ba50-1cfa1dee2c41", // miruko2
+  "e4f655b1-d2f7-43fa-ad17-8627296c148c", // 闲猫
 ]
