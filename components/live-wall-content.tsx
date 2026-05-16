@@ -176,7 +176,13 @@ export default function LiveWallContent() {
           setHanakoReply(data.reply || "")
         } else {
           const errData = await res.json().catch(() => ({}))
-          if (res.status === 429 && errData.error) {
+          if (res.status === 403) {
+            toast({
+              title: "无权限",
+              description: errData.error || "你没有与 hanako 对话的权限，请联系管理员获取",
+              variant: "destructive",
+            })
+          } else if (res.status === 429 && errData.error) {
             toast({
               title: "hanako 正忙",
               description: errData.error,
