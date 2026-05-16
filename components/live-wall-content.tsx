@@ -158,7 +158,8 @@ export default function LiveWallContent() {
           currentUser.user_metadata?.username ||
           (currentUser.email ? currentUser.email.split("@")[0] : "匿名")
 
-        const res = await fetch("/api/ai-reply", {
+        const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || ""
+        const res = await fetch(`${apiBase}/api/ai-reply`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({

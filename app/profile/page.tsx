@@ -6,7 +6,7 @@ import { useEffect, useState, useRef } from "react"
 import { supabase } from "@/lib/supabaseClient"
 import Navbar from "@/components/navbar"
 import BackgroundEffects from "@/components/background-effects"
-import { Bell, LogOut, ChevronRight, Camera } from "lucide-react"
+import { Bell, LogOut, ChevronRight, Camera, MessageSquare } from "lucide-react"
 import { useRouter } from "next/navigation"
 
 export default function ProfilePage() {
@@ -213,7 +213,20 @@ export default function ProfilePage() {
               <ChevronRight className="profile-menu-arrow w-5 h-5 text-white/40" />
             </button>
 
-            <div className="h-px bg-white/5 mx-6" />
+            <div className="h-px bg-white/5 mx-6 md:hidden" />
+
+            <button
+              className="profile-menu-item md:hidden"
+              onClick={() => router.push("/live")}
+            >
+              <div className="flex items-center space-x-3">
+                <MessageSquare className="w-5 h-5 text-lime-400" />
+                <span className="text-white">弹幕墙</span>
+              </div>
+              <ChevronRight className="profile-menu-arrow w-5 h-5 text-white/40" />
+            </button>
+
+            <div className="h-px bg-white/5 mx-6 md:hidden" />
 
             <button
               className="profile-menu-item danger"

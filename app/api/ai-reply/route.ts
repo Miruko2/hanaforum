@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
-import { checkRateLimit, recordCall } from "@/lib/hanako/rate-limit"
+import { checkRateLimit, startCall, endCall } from "@/lib/hanako/rate-limit"
 import { HANAKO_SYSTEM_PROMPT, buildUserMessage } from "@/lib/hanako/prompt"
 import {
   HANAKO_USER_ID,
   HANAKO_USERNAME,
   EMOTIONS,
   MAX_REPLY_TOKENS,
-  ALLOWED_USER_IDS,
   type HanakoEmotion,
 } from "@/lib/hanako/constants"
 
@@ -21,29 +20,45 @@ const supabaseAdmin = createClient(
 )
 
 export async function POST(req: NextRequest) {
+  let userId = ""
+
   try {
     const body = await req.json()
-    const { userId, username, content, recentMessages } = body as {
+    const parsed = body as {
       userId: string
       username: string
       content: string
       recentMessages?: { username: string; content: string }[]
     }
+    userId = parsed.userId
 
-    if (!userId || !username || !content) {
+    if (!parsed.userId || !parsed.username || !parsed.content) {
       return NextResponse.json({ error: "缺少必要参数" }, { status: 400 })
     }
 
-    // 白名单检查（空数组 = 不限制）
-    if (ALLOWED_USER_IDS.length > 0 && !ALLOWED_USER_IDS.includes(userId)) {
+    // 白名单检查（从数据库读取）
+    const { data: allowedUsers, error: allowedError } = await supabaseAdmin
+      .from("hanako_allowed_users")
+      .select("user_id")
+      .eq("user_id", parsed.userId)
+      .maybeSingle()
+
+    if (allowedError) {
+      console.error("[Hanako] 白名单查询错误:", allowedError)
+    }
+
+    // 如果白名单表存在且用户不在白名单中，拒绝访问
+    if (!allowedUsers) {
       return NextResponse.json({ error: "你没有与 hanako 对话的权限" }, { status: 403 })
     }
 
     // 限流检查
-    const rateCheck = checkRateLimit(userId)
+    const rateCheck = checkRateLimit(parsed.userId)
     if (!rateCheck.allowed) {
       return NextResponse.json({ error: rateCheck.reason }, { status: 429 })
     }
+
+    startCall(parsed.userId)
 
     // 调用 DeepSeek
     const apiKey = process.env.DEEPSEEK_API_KEY
@@ -55,9 +70,9 @@ export async function POST(req: NextRequest) {
     }
 
     const userMessage = buildUserMessage(
-      username,
-      content,
-      recentMessages || [],
+      parsed.username,
+      parsed.content,
+      parsed.recentMessages || [],
     )
 
     const aiResponse = await fetch(`${baseUrl}/chat/completions`, {
@@ -91,12 +106,10 @@ export async function POST(req: NextRequest) {
     let reply = ""
 
     try {
-      // 尝试直接解析
       const parsed = JSON.parse(rawReply)
       emotion = EMOTIONS.includes(parsed.emotion) ? parsed.emotion : "neutral"
       reply = parsed.reply || ""
     } catch {
-      // 如果 AI 没按格式输出，尝试提取 JSON
       const jsonMatch = rawReply.match(/\{[\s\S]*?"emotion"[\s\S]*?"reply"[\s\S]*?\}/)
       if (jsonMatch) {
         try {
@@ -104,7 +117,6 @@ export async function POST(req: NextRequest) {
           emotion = EMOTIONS.includes(parsed.emotion) ? parsed.emotion : "neutral"
           reply = parsed.reply || ""
         } catch {
-          // 实在解析不了，用原始文本
           reply = rawReply.slice(0, 100)
         }
       } else {
@@ -115,9 +127,6 @@ export async function POST(req: NextRequest) {
     if (!reply) {
       return NextResponse.json({ error: "AI 未生成有效回复" }, { status: 500 })
     }
-
-    // 记录调用
-    recordCall(userId)
 
     // 将 AI 回复写入 live_comments
     const { error: insertError } = await supabaseAdmin
@@ -132,7 +141,6 @@ export async function POST(req: NextRequest) {
 
     if (insertError) {
       console.error("[Hanako] 写入 live_comments 失败:", insertError)
-      // 即使写入失败，仍然返回 AI 回复给前端显示
     }
 
     return NextResponse.json({ emotion, reply })
@@ -142,5 +150,7 @@ export async function POST(req: NextRequest) {
       { error: error.message || "服务器内部错误" },
       { status: 500 },
     )
+  } finally {
+    if (userId) endCall(userId)
   }
 }
