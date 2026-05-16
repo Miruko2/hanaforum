@@ -55,90 +55,91 @@ export default function AdminPage() {
   const loadData = async () => {
     setLoading(true)
     try {
-      // 加载用户列表 - 从 profiles 表获取（users 表为空，user_profiles 被 RLS 拦截）
-      const { data: usersData, error: usersError } = await supabase
-        .from("profiles")
-        .select("id, username, avatar_url, updated_at")
-        .order("updated_at", { ascending: false, nullsFirst: false })
-
-      if (usersError) throw usersError
-      setUsers(usersData || [])
-
-      // 加载帖子列表
-      const { data: postsData, error: postsError } = await supabase
-        .from("posts")
-        .select("id, title, content, description, category, user_id, created_at")
-        .order("created_at", { ascending: false })
-
-      if (postsError) throw postsError
-
-      // 处理帖子数据 - 批量查询 profiles 获取用户名
-      const postUserIds = [...new Set((postsData || []).map(p => p.user_id).filter(Boolean))]
-      const usernameMap = new Map<string, string>()
-
-      if (postUserIds.length > 0) {
-        const { data: profiles } = await supabase
+      // 并行查询所有表
+      const [usersResult, postsResult, adminsResult, allowedResult] = await Promise.allSettled([
+        supabase
           .from("profiles")
-          .select("id, username")
-          .in("id", postUserIds)
+          .select("id, username, avatar_url, updated_at")
+          .order("updated_at", { ascending: false, nullsFirst: false }),
+        supabase
+          .from("posts")
+          .select("id, title, content, description, category, user_id, created_at")
+          .order("created_at", { ascending: false }),
+        supabase
+          .from("admin_users")
+          .select("id, user_id, added_by, created_at")
+          .order("created_at", { ascending: false }),
+        supabase
+          .from("hanako_allowed_users")
+          .select("id, user_id, added_by, created_at")
+          .order("created_at", { ascending: false }),
+      ])
 
-        for (const p of profiles || []) {
-          if (p.username) {
-            const name = p.username.includes("@") ? p.username.split("@")[0] : p.username
-            usernameMap.set(p.id, name)
+      // 处理用户列表
+      if (usersResult.status === "fulfilled" && !usersResult.value.error) {
+        setUsers(usersResult.value.data || [])
+      }
+
+      // 处理帖子列表
+      if (postsResult.status === "fulfilled" && !postsResult.value.error) {
+        const postsData = postsResult.value.data || []
+        const postUserIds = [...new Set(postsData.map(p => p.user_id).filter(Boolean))]
+        const usernameMap = new Map<string, string>()
+
+        if (postUserIds.length > 0) {
+          const { data: profiles } = await supabase
+            .from("profiles")
+            .select("id, username")
+            .in("id", postUserIds)
+
+          for (const p of profiles || []) {
+            if (p.username) {
+              const name = p.username.includes("@") ? p.username.split("@")[0] : p.username
+              usernameMap.set(p.id, name)
+            }
           }
         }
+
+        const processedPosts = postsData.map(post => ({
+          ...post,
+          username: usernameMap.get(post.user_id) || `用户_${post.user_id.substring(0, 6)}`,
+        }))
+
+        setPosts(processedPosts)
       }
 
-      const processedPosts = (postsData || []).map(post => ({
-        ...post,
-        username: usernameMap.get(post.user_id) || `用户_${post.user_id.substring(0, 6)}`,
-      }))
+      // 处理管理员列表
+      if (adminsResult.status === "fulfilled" && !adminsResult.value.error) {
+        const adminsData = adminsResult.value.data || []
+        const adminUserIds = [...new Set(adminsData.map(a => a.user_id).filter(Boolean))]
+        const adminProfileMap = new Map<string, { username: string | null }>()
 
-      setPosts(processedPosts)
+        if (adminUserIds.length > 0) {
+          const { data: adminProfiles } = await supabase
+            .from("profiles")
+            .select("id, username")
+            .in("id", adminUserIds)
 
-      // 加载管理员列表 - admin_users 表不和 users 做 join（users 表为空），改为单独查 profiles
-      const { data: adminsData, error: adminsError } = await supabase
-        .from("admin_users")
-        .select("id, user_id, added_by, created_at")
-        .order("created_at", { ascending: false })
-
-      if (adminsError) throw adminsError
-
-      const adminUserIds = [...new Set((adminsData || []).map(a => a.user_id).filter(Boolean))]
-      const adminProfileMap = new Map<string, { username: string | null }>()
-
-      if (adminUserIds.length > 0) {
-        const { data: adminProfiles } = await supabase
-          .from("profiles")
-          .select("id, username")
-          .in("id", adminUserIds)
-
-        for (const p of adminProfiles || []) {
-          adminProfileMap.set(p.id, { username: p.username })
+          for (const p of adminProfiles || []) {
+            adminProfileMap.set(p.id, { username: p.username })
+          }
         }
+
+        const processedAdmins = adminsData.map(a => ({
+          ...a,
+          users: {
+            username: adminProfileMap.get(a.user_id)?.username || null,
+            email: null,
+          },
+        }))
+
+        setAdmins(processedAdmins)
       }
 
-      const processedAdmins = (adminsData || []).map(a => ({
-        ...a,
-        users: {
-          username: adminProfileMap.get(a.user_id)?.username || null,
-          email: null, // anon key 无法访问 auth.users 表，邮箱显示为空
-        },
-      }))
-
-      setAdmins(processedAdmins)
-
-      // 加载 AI 白名单
-      const { data: allowedData, error: allowedError } = await supabase
-        .from("hanako_allowed_users")
-        .select("id, user_id, added_by, created_at")
-        .order("created_at", { ascending: false })
-
-      if (allowedError) {
-        console.warn("加载 AI 白名单失败:", allowedError.message)
-      } else {
-        const allowedUserIds = (allowedData || []).map((a) => a.user_id).filter(Boolean)
+      // 处理 AI 白名单
+      if (allowedResult.status === "fulfilled" && !allowedResult.value.error) {
+        const allowedData = allowedResult.value.data || []
+        const allowedUserIds = allowedData.map((a) => a.user_id).filter(Boolean)
         const allowedUsernameMap = new Map<string, string>()
 
         if (allowedUserIds.length > 0) {
@@ -154,7 +155,7 @@ export default function AdminPage() {
           }
         }
 
-        const processedAllowed = (allowedData || []).map((a) => ({
+        const processedAllowed = allowedData.map((a) => ({
           ...a,
           username: allowedUsernameMap.get(a.user_id) || null,
         }))
